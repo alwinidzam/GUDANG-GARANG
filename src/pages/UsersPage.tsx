@@ -62,57 +62,69 @@ export const UsersPage: React.FC = () => {
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-lg font-extrabold text-[#1A1614]">
+          <h2 className="text-lg font-bold tracking-tight">
             Manajemen Pengguna &amp; Hak Akses (RBAC)
           </h2>
-          <p className="text-xs text-[#6B6257]">
+          <p style={{ color: 'var(--text-secondary)' }} className="text-xs mt-0.5">
             Kendali akun karyawan dan otorisasi berjenjang khusus Super Admin.
           </p>
         </div>
         <button
           type="button"
           onClick={openAdd}
-          className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-[#B91C1C] hover:bg-[#991B1B] text-white text-xs font-bold cursor-pointer"
+          className="min-h-[44px] inline-flex items-center gap-1.5 px-4 py-2 hig-btn-cta text-xs font-semibold"
         >
-          <UserPlus className="w-4 h-4" />
-          Tambah User Baru
+          <UserPlus className="w-4 h-4" aria-hidden="true" />
+          <span>Tambah User Baru</span>
         </button>
       </div>
 
       {/* Role Reference Strip */}
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
         {ALL_ROLES.map((r) => (
-          <div key={r} className="bg-white border border-[#E6E0D6] rounded-xl p-4">
+          <div key={r} className="hig-card p-4">
             <div className="flex items-center gap-2 mb-1.5">
-              <ShieldCheck className="w-4 h-4 text-[#B8860B]" />
-              <span className="text-xs font-extrabold text-[#1A1614]">{getRoleLabel(r)}</span>
+              <ShieldCheck
+                style={{ color: 'var(--accent-gold)' }}
+                className="w-4 h-4"
+                aria-hidden="true"
+              />
+              <span className="text-xs font-bold">{getRoleLabel(r)}</span>
             </div>
-            <p className="text-xs text-[#6B6257] leading-relaxed">{getRoleSummary(r)}</p>
+            <p style={{ color: 'var(--text-secondary)' }} className="text-xs leading-relaxed">
+              {getRoleSummary(r)}
+            </p>
           </div>
         ))}
       </div>
 
       {/* Users Table */}
-      <div className="bg-white border border-[#E6E0D6] rounded-xl shadow-xs overflow-hidden">
+      <div className="hig-card overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-xs text-left">
-            <thead className="bg-[#F8F6F2] border-b border-[#E6E0D6] text-[#5C5349] uppercase">
+            <thead className="hig-table-head">
               <tr>
-                <th className="py-3 px-4 font-bold">Nama Lengkap</th>
-                <th className="py-3 px-4 font-bold">Username</th>
-                <th className="py-3 px-4 font-bold">Role</th>
-                <th className="py-3 px-4 font-bold">Status</th>
-                <th className="py-3 px-4 font-bold">Dibuat</th>
-                <th className="py-3 px-4 font-bold text-right">Aksi</th>
+                <th className="py-3 px-4 font-semibold">Nama Lengkap</th>
+                <th className="py-3 px-4 font-semibold">Username</th>
+                <th className="py-3 px-4 font-semibold">Role</th>
+                <th className="py-3 px-4 font-semibold">Status</th>
+                <th className="py-3 px-4 font-semibold">Dibuat</th>
+                <th className="py-3 px-4 font-semibold text-right">Aksi</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-[#EDE7DD]">
+            <tbody>
               {db.users.map((u) => (
-                <tr key={u.id} className="hover:bg-[#FAF8F4]">
-                  <td className="py-3 px-4 font-bold text-[#1A1614]">
+                <tr key={u.id} className="hig-row-hover">
+                  <td className="py-3 px-4 font-bold">
                     {u.name}
                     {currentUser?.id === u.id && (
-                      <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-[#14110F] text-white">
+                      <span
+                        style={{
+                          backgroundColor: 'var(--cta-bg)',
+                          color: 'var(--cta-text)',
+                        }}
+                        className="ml-2 text-[10px] px-1.5 py-0.5 rounded font-semibold"
+                      >
                         Anda
                       </span>
                     )}
@@ -123,33 +135,44 @@ export const UsersPage: React.FC = () => {
                   </td>
                   <td className="py-3 px-4">
                     <span
-                      className={`px-2 py-0.5 rounded font-semibold ${
-                        u.isActive
-                          ? 'bg-emerald-50 text-emerald-700'
-                          : 'bg-stone-100 text-stone-500'
-                      }`}
+                      style={{
+                        color: u.isActive ? 'var(--status-positive)' : 'var(--text-secondary)',
+                      }}
+                      className="inline-flex items-center gap-1.5 font-semibold"
                     >
+                      <span
+                        className="w-1.5 h-1.5 rounded-full bg-current shrink-0"
+                        aria-hidden="true"
+                      />
                       {u.isActive ? 'Aktif' : 'Nonaktif'}
                     </span>
                   </td>
-                  <td className="py-3 px-4 text-[#6B6257]">{formatDate(u.createdAt)}</td>
+                  <td style={{ color: 'var(--text-secondary)' }} className="py-3 px-4">
+                    {formatDate(u.createdAt)}
+                  </td>
                   <td className="py-3 px-4 text-right space-x-1">
                     <button
                       type="button"
                       onClick={() => openEdit(u)}
-                      className="p-1.5 rounded border border-[#D8D0C5] hover:bg-[#F1EDE5] cursor-pointer"
+                      className="w-8 h-8 inline-flex items-center justify-center hig-btn-secondary"
+                      aria-label={`Edit ${u.username}`}
                       title="Edit akun"
                     >
-                      <Pencil className="w-3.5 h-3.5" />
+                      <Pencil className="w-3.5 h-3.5" aria-hidden="true" />
                     </button>
                     {currentUser?.id !== u.id && (
                       <button
                         type="button"
                         onClick={() => handleDelete(u)}
-                        className="p-1.5 rounded border border-rose-200 text-rose-700 hover:bg-rose-50 cursor-pointer"
+                        style={{
+                          backgroundColor: 'var(--status-danger-soft)',
+                          color: 'var(--status-danger)',
+                        }}
+                        className="w-8 h-8 inline-flex items-center justify-center rounded-lg"
+                        aria-label={`Hapus ${u.username}`}
                         title="Hapus akun"
                       >
-                        <Trash2 className="w-3.5 h-3.5" />
+                        <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
                       </button>
                     )}
                   </td>
@@ -160,6 +183,7 @@ export const UsersPage: React.FC = () => {
         </div>
       </div>
 
+      {/* User Modal (3 macOS dots) */}
       <Modal
         open={modalOpen}
         onClose={() => setModalOpen(false)}
@@ -167,32 +191,41 @@ export const UsersPage: React.FC = () => {
       >
         <form onSubmit={handleSave} className="space-y-3.5 text-sm">
           <div>
-            <label className="block text-xs font-bold text-[#5C5349] mb-1">Nama Lengkap *</label>
+            <label htmlFor="usr-name" className="block text-xs font-semibold mb-1">
+              Nama Lengkap *
+            </label>
             <input
+              id="usr-name"
               type="text"
               required
               value={name}
               onChange={(e) => setName(e.target.value)}
-              className="w-full px-3 py-2 rounded-lg border border-[#D8D0C5]"
+              className="w-full min-h-[42px] px-3 py-2 hig-input"
             />
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-xs font-bold text-[#5C5349] mb-1">Username *</label>
+              <label htmlFor="usr-username" className="block text-xs font-semibold mb-1">
+                Username *
+              </label>
               <input
+                id="usr-username"
                 type="text"
                 required
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
-                className="w-full px-3 py-2 rounded-lg border border-[#D8D0C5] font-mono lowercase"
+                className="w-full min-h-[42px] px-3 py-2 hig-input font-mono lowercase"
               />
             </div>
             <div>
-              <label className="block text-xs font-bold text-[#5C5349] mb-1">Role / Jabatan *</label>
+              <label htmlFor="usr-role" className="block text-xs font-semibold mb-1">
+                Role / Jabatan *
+              </label>
               <select
+                id="usr-role"
                 value={role}
                 onChange={(e) => setRole(e.target.value as Role)}
-                className="w-full px-3 py-2 rounded-lg border border-[#D8D0C5] bg-white"
+                className="w-full min-h-[42px] px-3 py-2 hig-input"
               >
                 {ALL_ROLES.map((r) => (
                   <option key={r} value={r}>
@@ -203,37 +236,39 @@ export const UsersPage: React.FC = () => {
             </div>
           </div>
           <div>
-            <label className="block text-xs font-bold text-[#5C5349] mb-1">
+            <label htmlFor="usr-pw" className="block text-xs font-semibold mb-1">
               {editingId ? 'Password Baru (kosongkan jika tidak diubah)' : 'Password *'}
             </label>
             <input
+              id="usr-pw"
               type="password"
               required={!editingId}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder="Minimal 4 karakter"
-              className="w-full px-3 py-2 rounded-lg border border-[#D8D0C5]"
+              className="w-full min-h-[42px] px-3 py-2 hig-input"
             />
           </div>
-          <label className="inline-flex items-center gap-2 text-xs font-semibold cursor-pointer">
+          <label htmlFor="usr-active" className="inline-flex items-center gap-2 text-xs font-semibold">
             <input
+              id="usr-active"
               type="checkbox"
               checked={isActive}
               onChange={(e) => setIsActive(e.target.checked)}
             />
-            Akun Aktif (dapat login ke sistem)
+            <span>Akun Aktif (dapat login ke sistem)</span>
           </label>
           <div className="flex justify-end gap-2 pt-2">
             <button
               type="button"
               onClick={() => setModalOpen(false)}
-              className="px-4 py-2 rounded-lg border border-[#D8D0C5] text-xs font-bold cursor-pointer"
+              className="min-h-[44px] px-4 py-2 hig-btn-secondary text-xs font-semibold"
             >
               Batal
             </button>
             <button
               type="submit"
-              className="px-4 py-2 rounded-lg bg-[#B91C1C] text-white text-xs font-bold cursor-pointer"
+              className="min-h-[44px] px-4 py-2 hig-btn-cta text-xs font-semibold"
             >
               Simpan User
             </button>

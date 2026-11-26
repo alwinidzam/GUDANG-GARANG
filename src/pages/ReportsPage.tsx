@@ -9,15 +9,18 @@ import {
   Tooltip,
   Legend,
 } from 'recharts';
-import { Download } from 'lucide-react';
+import { Download, BarChart3 } from 'lucide-react';
 import { useErp } from '../context/ErpContext';
+import { useTheme } from '../context/ThemeContext';
 import { downloadCsv } from '../lib/csv';
 import { addDaysISO, extractDateISO, formatRupiah, toLocalDateISO } from '../lib/format';
+import { EmptyState } from '../components/ui/SharedUi';
 
 type ReportTab = 'DAILY' | 'MONTHLY' | 'BEST_SELLER' | 'TOP_CUSTOMERS' | 'TURNOVER';
 
 export const ReportsPage: React.FC = () => {
   const { db, can } = useErp();
+  const { resolvedTheme } = useTheme();
   const today = toLocalDateISO();
 
   const [tab, setTab] = useState<ReportTab>('DAILY');
@@ -34,7 +37,6 @@ export const ReportsPage: React.FC = () => {
     });
   }, [db.transactions, startDate, endDate]);
 
-  // 1. Daily report
   const dailyRows = useMemo(() => {
     const map = new Map<
       string,
@@ -60,11 +62,18 @@ export const ReportsPage: React.FC = () => {
       .sort((a, b) => b.date.localeCompare(a.date));
   }, [completedTxs]);
 
-  // 2. Monthly P&L report (based on all completed transactions, or filtered range)
   const monthlyRows = useMemo(() => {
     const map = new Map<
       string,
-      { month: string; txCount: number; grossRevenue: number; tax: number; hpp: number; netProfit: number }
+      {
+        month: string;
+        txCount: number;
+        grossRevenue: number;
+        tax: number;
+        hpp: number;
+        expenses: number;
+        netProfit: number;
+      }
     >();
     for (const tx of completedTxs) {
       const ym = extractDateISO(tx.createdAt).slice(0, 7);
@@ -74,6 +83,7 @@ export const ReportsPage: React.FC = () => {
         grossRevenue: 0,
         tax: 0,
         hpp: 0,
+        expenses: 0,
         netProfit: 0,
       };
       const txHpp = tx.items.reduce((a, it) => a + it.costPrice * it.qty, 0);
@@ -84,10 +94,26 @@ export const ReportsPage: React.FC = () => {
       curr.netProfit += tx.subtotal - txHpp;
       map.set(ym, curr);
     }
+    for (const exp of db.expenses || []) {
+      if (startDate && exp.date < startDate) continue;
+      if (endDate && exp.date > endDate) continue;
+      const ym = exp.date.slice(0, 7);
+      const curr = map.get(ym) || {
+        month: ym,
+        txCount: 0,
+        grossRevenue: 0,
+        tax: 0,
+        hpp: 0,
+        expenses: 0,
+        netProfit: 0,
+      };
+      curr.expenses += exp.amount;
+      curr.netProfit -= exp.amount;
+      map.set(ym, curr);
+    }
     return Array.from(map.values()).sort((a, b) => a.month.localeCompare(b.month));
-  }, [completedTxs]);
+  }, [completedTxs, db.expenses, startDate, endDate]);
 
-  // 3. Best Seller report
   const bestSellerRows = useMemo(() => {
     const map = new Map<
       string,
@@ -112,7 +138,6 @@ export const ReportsPage: React.FC = () => {
     return Array.from(map.values()).sort((a, b) => b.revenue - a.revenue);
   }, [completedTxs]);
 
-  // 4. Top Spenders report
   const topCustomerRows = useMemo(() => {
     const map = new Map<
       string,
@@ -134,7 +159,6 @@ export const ReportsPage: React.FC = () => {
     return Array.from(map.values()).sort((a, b) => b.totalSpend - a.totalSpend);
   }, [completedTxs]);
 
-  // 5. Stock Turnover report
   const turnoverRows = useMemo(() => {
     const soldMap = new Map<string, number>();
     for (const tx of completedTxs) {
@@ -170,8 +194,8 @@ export const ReportsPage: React.FC = () => {
     } else if (tab === 'MONTHLY') {
       downloadCsv(
         `laporan-bulanan-laba-rugi.csv`,
-        ['Bulan', 'Transaksi', 'Gross Revenue', 'PPN', 'Total HPP', 'Laba Bersih (Ex-PPN)'],
-        monthlyRows.map((r) => [r.month, r.txCount, r.grossRevenue, r.tax, r.hpp, r.netProfit])
+        ['Bulan', 'Transaksi', 'Gross Revenue', 'PPN', 'Total HPP', 'Pengeluaran Ops.', 'Laba Bersih'],
+        monthlyRows.map((r) => [r.month, r.txCount, r.grossRevenue, r.tax, r.hpp, r.expenses, r.netProfit])
       );
     } else if (tab === 'BEST_SELLER') {
       downloadCsv(
@@ -201,14 +225,18 @@ export const ReportsPage: React.FC = () => {
     }
   };
 
+  const gridStroke = resolvedTheme === 'dark' ? '#2E2B28' : '#ECECEF';
+  const axisTickColor = resolvedTheme === 'dark' ? '#AEA8A1' : '#52525B';
+  const revenueBarColor = resolvedTheme === 'dark' ? '#F4F4F5' : '#18181B';
+
   return (
     <div className="space-y-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-lg font-extrabold text-[#1A1614]">
+          <h2 className="text-lg font-bold tracking-tight">
             Laporan Keuangan &amp; Analitik Multi-Dimensi
           </h2>
-          <p className="text-xs text-[#6B6257]">
+          <p style={{ color: 'var(--text-secondary)' }} className="text-xs mt-0.5">
             Analisis laba rugi, omset harian, produk terlaris, top pelanggan, dan perputaran stok.
           </p>
         </div>
@@ -216,32 +244,42 @@ export const ReportsPage: React.FC = () => {
         <div className="flex flex-wrap items-center gap-2 text-xs">
           <input
             type="date"
+            aria-label="Tanggal mulai laporan"
             value={startDate}
             onChange={(e) => setStartDate(e.target.value)}
-            className="px-2.5 py-1.5 rounded-lg border border-[#D8D0C5] bg-white"
+            className="min-h-[40px] px-2.5 py-1.5 hig-input"
           />
-          <span className="text-[#6B6257]">s/d</span>
+          <span style={{ color: 'var(--text-secondary)' }}>s/d</span>
           <input
             type="date"
+            aria-label="Tanggal akhir laporan"
             value={endDate}
             onChange={(e) => setEndDate(e.target.value)}
-            className="px-2.5 py-1.5 rounded-lg border border-[#D8D0C5] bg-white"
+            className="min-h-[40px] px-2.5 py-1.5 hig-input"
           />
           {can('reports:export') && (
             <button
               type="button"
               onClick={handleExportActiveTab}
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-[#14110F] hover:bg-[#B91C1C] text-white font-bold cursor-pointer"
+              className="min-h-[40px] inline-flex items-center gap-1.5 px-3.5 py-2 hig-btn-cta font-semibold"
             >
-              <Download className="w-3.5 h-3.5" />
-              Export CSV / Excel
+              <Download className="w-3.5 h-3.5" aria-hidden="true" />
+              <span>Export CSV / Excel</span>
             </button>
           )}
         </div>
       </div>
 
-      {/* Tabs */}
-      <div className="flex flex-wrap gap-1.5 bg-white border border-[#E6E0D6] rounded-xl p-2">
+      {/* Segmented Tabs (Image 1 style) */}
+      <div
+        role="tablist"
+        aria-label="Jenis laporan keuangan"
+        style={{
+          backgroundColor: 'var(--bg-subtle)',
+          borderColor: 'var(--border-hairline)',
+        }}
+        className="flex flex-wrap gap-1 border rounded-xl p-1"
+      >
         {(
           [
             { id: 'DAILY', label: 'Laporan Harian' },
@@ -250,42 +288,71 @@ export const ReportsPage: React.FC = () => {
             { id: 'TOP_CUSTOMERS', label: 'Top Pelanggan' },
             { id: 'TURNOVER', label: 'Perputaran Stok' },
           ] as const
-        ).map((t) => (
-          <button
-            key={t.id}
-            type="button"
-            onClick={() => setTab(t.id)}
-            className={`px-3.5 py-2 rounded-lg text-xs font-bold cursor-pointer ${
-              tab === t.id
-                ? 'bg-[#B91C1C] text-white'
-                : 'text-[#5C5349] hover:bg-[#F1EDE5]'
-            }`}
-          >
-            {t.label}
-          </button>
-        ))}
+        ).map((t) => {
+          const active = tab === t.id;
+          return (
+            <button
+              key={t.id}
+              type="button"
+              role="tab"
+              aria-selected={active}
+              onClick={() => setTab(t.id)}
+              style={
+                active
+                  ? { backgroundColor: 'var(--bg-surface)', color: 'var(--text-primary)' }
+                  : { color: 'var(--text-secondary)' }
+              }
+              className={`min-h-[38px] px-3.5 py-1.5 rounded-lg text-xs font-semibold ${
+                active ? 'shadow-xs' : 'hover:text-[var(--text-primary)]'
+              }`}
+            >
+              {t.label}
+            </button>
+          );
+        })}
       </div>
 
       {/* Monthly P&L Chart */}
       {tab === 'MONTHLY' && monthlyRows.length > 0 && (
-        <div className="bg-white border border-[#E6E0D6] rounded-xl p-5">
-          <h3 className="text-sm font-extrabold text-[#1A1614] mb-3">
-            Grafik Pendapatan Kotor, HPP &amp; Laba Bersih Bulanan
+        <div className="hig-card p-5">
+          <h3 className="text-sm font-bold mb-3">
+            Perbandingan Pendapatan Kotor, HPP, dan Laba Bersih Bulanan
           </h3>
           <div className="h-[260px] w-full">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={monthlyRows}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#EDE7DD" />
-                <XAxis dataKey="month" tick={{ fontSize: 11 }} />
+                <CartesianGrid strokeDasharray="3 3" stroke={gridStroke} />
+                <XAxis dataKey="month" tick={{ fontSize: 11, fill: axisTickColor }} />
                 <YAxis
-                  tick={{ fontSize: 11 }}
+                  tick={{ fontSize: 11, fill: axisTickColor }}
                   tickFormatter={(v: number) => `${Math.round(v / 1_000_000)}jt`}
                 />
-                <Tooltip formatter={(val: number) => formatRupiah(val)} />
+                <Tooltip
+                  formatter={(val: number) => formatRupiah(val)}
+                  contentStyle={{
+                    backgroundColor: '#18181B',
+                    borderColor: '#3F3F46',
+                    borderRadius: '10px',
+                    color: '#FFFFFF',
+                    fontSize: '12px',
+                  }}
+                  itemStyle={{ color: '#FFFFFF' }}
+                  labelStyle={{ color: '#E4E4E7', fontWeight: 600 }}
+                />
                 <Legend />
-                <Bar dataKey="grossRevenue" name="Gross Revenue" fill="#14110F" radius={[4, 4, 0, 0]} />
-                <Bar dataKey="hpp" name="HPP Modal" fill="#D4A017" radius={[4, 4, 0, 0]} />
-                <Bar dataKey="netProfit" name="Laba Bersih" fill="#10B981" radius={[4, 4, 0, 0]} />
+                <Bar
+                  dataKey="grossRevenue"
+                  name="Gross Revenue"
+                  fill={revenueBarColor}
+                  radius={[4, 4, 0, 0]}
+                />
+                <Bar dataKey="hpp" name="HPP Modal" fill="#B45309" radius={[4, 4, 0, 0]} />
+                <Bar
+                  dataKey="netProfit"
+                  name="Laba Bersih"
+                  fill="#047857"
+                  radius={[4, 4, 0, 0]}
+                />
               </BarChart>
             </ResponsiveContainer>
           </div>
@@ -293,162 +360,227 @@ export const ReportsPage: React.FC = () => {
       )}
 
       {/* Report Table */}
-      <div className="bg-white border border-[#E6E0D6] rounded-xl shadow-xs overflow-hidden">
+      <div className="hig-card overflow-hidden">
         <div className="overflow-x-auto">
-          {tab === 'DAILY' && (
-            <table className="w-full text-xs text-left">
-              <thead className="bg-[#F8F6F2] border-b border-[#E6E0D6] text-[#5C5349] uppercase">
-                <tr>
-                  <th className="py-3 px-4 font-bold">Tanggal</th>
-                  <th className="py-3 px-4 font-bold text-right">Transaksi</th>
-                  <th className="py-3 px-4 font-bold text-right">Omset (Incl. PPN)</th>
-                  <th className="py-3 px-4 font-bold text-right">Penjualan Bersih</th>
-                  <th className="py-3 px-4 font-bold text-right">HPP</th>
-                  <th className="py-3 px-4 font-bold text-right">Laba Kotor</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-[#EDE7DD] tabular-nums">
-                {dailyRows.map((r) => (
-                  <tr key={r.date} className="hover:bg-[#FAF8F4]">
-                    <td className="py-3 px-4 font-mono font-bold">{r.date}</td>
-                    <td className="py-3 px-4 text-right">{r.txCount}</td>
-                    <td className="py-3 px-4 text-right font-bold">
-                      {formatRupiah(r.grossRevenue)}
-                    </td>
-                    <td className="py-3 px-4 text-right">{formatRupiah(r.netSubtotal)}</td>
-                    <td className="py-3 px-4 text-right text-[#6B6257]">{formatRupiah(r.hpp)}</td>
-                    <td className="py-3 px-4 text-right font-extrabold text-emerald-700">
-                      {formatRupiah(r.grossProfit)}
-                    </td>
+          {tab === 'DAILY' &&
+            (dailyRows.length === 0 ? (
+              <EmptyState
+                icon={BarChart3}
+                title="Belum ada transaksi pada periode ini"
+                description="Catat penjualan melalui Kasir & POS atau perluas rentang tanggal untuk melihat laporan harian."
+              />
+            ) : (
+              <table className="w-full text-xs text-left">
+                <thead className="hig-table-head">
+                  <tr>
+                    <th className="py-3 px-4 font-semibold">Tanggal</th>
+                    <th className="py-3 px-4 font-semibold text-right">Transaksi</th>
+                    <th className="py-3 px-4 font-semibold text-right">Omset (Incl. PPN)</th>
+                    <th className="py-3 px-4 font-semibold text-right">Penjualan Bersih</th>
+                    <th className="py-3 px-4 font-semibold text-right">HPP</th>
+                    <th className="py-3 px-4 font-semibold text-right">Laba Kotor</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
+                </thead>
+                <tbody className="tabular-nums">
+                  {dailyRows.map((r) => (
+                    <tr key={r.date} className="hig-row-hover">
+                      <td className="py-3 px-4 font-mono font-bold">{r.date}</td>
+                      <td className="py-3 px-4 text-right">{r.txCount}</td>
+                      <td className="py-3 px-4 text-right font-bold">
+                        {formatRupiah(r.grossRevenue)}
+                      </td>
+                      <td className="py-3 px-4 text-right">{formatRupiah(r.netSubtotal)}</td>
+                      <td style={{ color: 'var(--text-secondary)' }} className="py-3 px-4 text-right">
+                        {formatRupiah(r.hpp)}
+                      </td>
+                      <td
+                        style={{ color: 'var(--status-positive)' }}
+                        className="py-3 px-4 text-right font-bold"
+                      >
+                        {formatRupiah(r.grossProfit)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            ))}
 
-          {tab === 'MONTHLY' && (
-            <table className="w-full text-xs text-left">
-              <thead className="bg-[#F8F6F2] border-b border-[#E6E0D6] text-[#5C5349] uppercase">
-                <tr>
-                  <th className="py-3 px-4 font-bold">Bulan</th>
-                  <th className="py-3 px-4 font-bold text-right">Transaksi</th>
-                  <th className="py-3 px-4 font-bold text-right">Gross Revenue</th>
-                  <th className="py-3 px-4 font-bold text-right">PPN Terkumpul</th>
-                  <th className="py-3 px-4 font-bold text-right">Total HPP</th>
-                  <th className="py-3 px-4 font-bold text-right">Laba Bersih (Ex-PPN)</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-[#EDE7DD] tabular-nums">
-                {monthlyRows.map((r) => (
-                  <tr key={r.month}>
-                    <td className="py-3 px-4 font-mono font-bold">{r.month}</td>
-                    <td className="py-3 px-4 text-right">{r.txCount}</td>
-                    <td className="py-3 px-4 text-right font-bold">
-                      {formatRupiah(r.grossRevenue)}
-                    </td>
-                    <td className="py-3 px-4 text-right">{formatRupiah(r.tax)}</td>
-                    <td className="py-3 px-4 text-right text-[#6B6257]">{formatRupiah(r.hpp)}</td>
-                    <td className="py-3 px-4 text-right font-extrabold text-emerald-700">
-                      {formatRupiah(r.netProfit)}
-                    </td>
+          {tab === 'MONTHLY' &&
+            (monthlyRows.length === 0 ? (
+              <EmptyState
+                icon={BarChart3}
+                title="Belum ada data laba rugi bulanan"
+                description="Ringkasan bulanan akan muncul otomatis setelah transaksi penjualan tercatat."
+              />
+            ) : (
+              <table className="w-full text-xs text-left">
+                <thead className="hig-table-head">
+                  <tr>
+                    <th className="py-3 px-4 font-semibold">Bulan</th>
+                    <th className="py-3 px-4 font-semibold text-right">Transaksi</th>
+                    <th className="py-3 px-4 font-semibold text-right">Gross Revenue</th>
+                    <th className="py-3 px-4 font-semibold text-right">PPN Terkumpul</th>
+                    <th className="py-3 px-4 font-semibold text-right">Total HPP</th>
+                    <th className="py-3 px-4 font-semibold text-right">Pengeluaran Ops.</th>
+                    <th className="py-3 px-4 font-semibold text-right">Laba Bersih Riil</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
+                </thead>
+                <tbody className="tabular-nums">
+                  {monthlyRows.map((r) => (
+                    <tr key={r.month} className="hig-row-hover">
+                      <td className="py-3 px-4 font-mono font-bold">{r.month}</td>
+                      <td className="py-3 px-4 text-right">{r.txCount}</td>
+                      <td className="py-3 px-4 text-right font-bold">
+                        {formatRupiah(r.grossRevenue)}
+                      </td>
+                      <td className="py-3 px-4 text-right">{formatRupiah(r.tax)}</td>
+                      <td style={{ color: 'var(--text-secondary)' }} className="py-3 px-4 text-right">
+                        {formatRupiah(r.hpp)}
+                      </td>
+                      <td style={{ color: 'var(--status-danger)' }} className="py-3 px-4 text-right">
+                        {formatRupiah(r.expenses)}
+                      </td>
+                      <td
+                        style={{
+                          color:
+                            r.netProfit >= 0 ? 'var(--status-positive)' : 'var(--status-danger)',
+                        }}
+                        className="py-3 px-4 text-right font-bold"
+                      >
+                        {formatRupiah(r.netProfit)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            ))}
 
-          {tab === 'BEST_SELLER' && (
-            <table className="w-full text-xs text-left">
-              <thead className="bg-[#F8F6F2] border-b border-[#E6E0D6] text-[#5C5349] uppercase">
-                <tr>
-                  <th className="py-3 px-4 font-bold">#</th>
-                  <th className="py-3 px-4 font-bold">SKU</th>
-                  <th className="py-3 px-4 font-bold">Nama Produk</th>
-                  <th className="py-3 px-4 font-bold text-right">Qty Terjual</th>
-                  <th className="py-3 px-4 font-bold text-right">Kontribusi Pendapatan</th>
-                  <th className="py-3 px-4 font-bold text-right">Laba Kotor</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-[#EDE7DD] tabular-nums">
-                {bestSellerRows.map((r, idx) => (
-                  <tr key={r.sku}>
-                    <td className="py-3 px-4 font-bold text-[#B91C1C]">#{idx + 1}</td>
-                    <td className="py-3 px-4 font-mono">{r.sku}</td>
-                    <td className="py-3 px-4 font-bold">{r.name}</td>
-                    <td className="py-3 px-4 text-right font-semibold">
-                      {r.qtySold} {r.unit}
-                    </td>
-                    <td className="py-3 px-4 text-right font-bold">{formatRupiah(r.revenue)}</td>
-                    <td className="py-3 px-4 text-right font-extrabold text-emerald-700">
-                      {formatRupiah(r.profit)}
-                    </td>
+          {tab === 'BEST_SELLER' &&
+            (bestSellerRows.length === 0 ? (
+              <EmptyState
+                icon={BarChart3}
+                title="Belum ada produk terjual pada periode ini"
+                description="Peringkat produk terlaris dihitung dari transaksi penjualan selesai."
+              />
+            ) : (
+              <table className="w-full text-xs text-left">
+                <thead className="hig-table-head">
+                  <tr>
+                    <th className="py-3 px-4 font-semibold">#</th>
+                    <th className="py-3 px-4 font-semibold">SKU</th>
+                    <th className="py-3 px-4 font-semibold">Nama Produk</th>
+                    <th className="py-3 px-4 font-semibold text-right">Qty Terjual</th>
+                    <th className="py-3 px-4 font-semibold text-right">Kontribusi Pendapatan</th>
+                    <th className="py-3 px-4 font-semibold text-right">Laba Kotor</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
+                </thead>
+                <tbody className="tabular-nums">
+                  {bestSellerRows.map((r, idx) => (
+                    <tr key={r.sku} className="hig-row-hover">
+                      <td
+                        style={{ color: 'var(--accent-primary-text)' }}
+                        className="py-3 px-4 font-bold"
+                      >
+                        #{idx + 1}
+                      </td>
+                      <td className="py-3 px-4 font-mono">{r.sku}</td>
+                      <td className="py-3 px-4 font-bold">{r.name}</td>
+                      <td className="py-3 px-4 text-right font-semibold">
+                        {r.qtySold} {r.unit}
+                      </td>
+                      <td className="py-3 px-4 text-right font-bold">{formatRupiah(r.revenue)}</td>
+                      <td
+                        style={{ color: 'var(--status-positive)' }}
+                        className="py-3 px-4 text-right font-bold"
+                      >
+                        {formatRupiah(r.profit)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            ))}
 
-          {tab === 'TOP_CUSTOMERS' && (
-            <table className="w-full text-xs text-left">
-              <thead className="bg-[#F8F6F2] border-b border-[#E6E0D6] text-[#5C5349] uppercase">
-                <tr>
-                  <th className="py-3 px-4 font-bold">Peringkat</th>
-                  <th className="py-3 px-4 font-bold">Nama Pelanggan</th>
-                  <th className="py-3 px-4 font-bold text-right">Jumlah Transaksi</th>
-                  <th className="py-3 px-4 font-bold text-right">Rata-Rata Order</th>
-                  <th className="py-3 px-4 font-bold text-right">Total Kontribusi</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-[#EDE7DD] tabular-nums">
-                {topCustomerRows.map((r, idx) => (
-                  <tr key={r.name}>
-                    <td className="py-3 px-4 font-bold text-[#B8860B]">#{idx + 1}</td>
-                    <td className="py-3 px-4 font-bold">{r.name}</td>
-                    <td className="py-3 px-4 text-right">{r.txCount}</td>
-                    <td className="py-3 px-4 text-right">{formatRupiah(r.avgOrder)}</td>
-                    <td className="py-3 px-4 text-right font-extrabold text-[#1A1614]">
-                      {formatRupiah(r.totalSpend)}
-                    </td>
+          {tab === 'TOP_CUSTOMERS' &&
+            (topCustomerRows.length === 0 ? (
+              <EmptyState
+                icon={BarChart3}
+                title="Belum ada data belanja pelanggan"
+                description="Kontribusi pelanggan teratas akan tampil setelah transaksi tercatat."
+              />
+            ) : (
+              <table className="w-full text-xs text-left">
+                <thead className="hig-table-head">
+                  <tr>
+                    <th className="py-3 px-4 font-semibold">Peringkat</th>
+                    <th className="py-3 px-4 font-semibold">Nama Pelanggan</th>
+                    <th className="py-3 px-4 font-semibold text-right">Jumlah Transaksi</th>
+                    <th className="py-3 px-4 font-semibold text-right">Rata-Rata Order</th>
+                    <th className="py-3 px-4 font-semibold text-right">Total Kontribusi</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
+                </thead>
+                <tbody className="tabular-nums">
+                  {topCustomerRows.map((r, idx) => (
+                    <tr key={r.name} className="hig-row-hover">
+                      <td style={{ color: 'var(--accent-gold)' }} className="py-3 px-4 font-bold">
+                        #{idx + 1}
+                      </td>
+                      <td className="py-3 px-4 font-bold">{r.name}</td>
+                      <td className="py-3 px-4 text-right">{r.txCount}</td>
+                      <td className="py-3 px-4 text-right">{formatRupiah(r.avgOrder)}</td>
+                      <td className="py-3 px-4 text-right font-bold">
+                        {formatRupiah(r.totalSpend)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            ))}
 
-          {tab === 'TURNOVER' && (
-            <table className="w-full text-xs text-left">
-              <thead className="bg-[#F8F6F2] border-b border-[#E6E0D6] text-[#5C5349] uppercase">
-                <tr>
-                  <th className="py-3 px-4 font-bold">SKU</th>
-                  <th className="py-3 px-4 font-bold">Nama Produk</th>
-                  <th className="py-3 px-4 font-bold text-right">Stok Akhir</th>
-                  <th className="py-3 px-4 font-bold text-right">Terjual (Periode)</th>
-                  <th className="py-3 px-4 font-bold text-right">Rasio Perputaran</th>
-                  <th className="py-3 px-4 font-bold text-right">Valuasi Stok (HPP)</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-[#EDE7DD] tabular-nums">
-                {turnoverRows.map((r) => (
-                  <tr key={r.sku}>
-                    <td className="py-3 px-4 font-mono">{r.sku}</td>
-                    <td className="py-3 px-4 font-bold">{r.name}</td>
-                    <td className="py-3 px-4 text-right">
-                      {r.currentStock} {r.unit}
-                    </td>
-                    <td className="py-3 px-4 text-right font-semibold">
-                      {r.qtySold} {r.unit}
-                    </td>
-                    <td className="py-3 px-4 text-right font-extrabold text-[#B91C1C]">
-                      {r.turnoverRate}x
-                    </td>
-                    <td className="py-3 px-4 text-right font-bold">
-                      {formatRupiah(r.hppStockValue)}
-                    </td>
+          {tab === 'TURNOVER' &&
+            (turnoverRows.length === 0 ? (
+              <EmptyState
+                icon={BarChart3}
+                title="Belum ada produk di katalog"
+                description="Tambahkan produk di Master Produk untuk memantau rasio perputaran stok."
+              />
+            ) : (
+              <table className="w-full text-xs text-left">
+                <thead className="hig-table-head">
+                  <tr>
+                    <th className="py-3 px-4 font-semibold">SKU</th>
+                    <th className="py-3 px-4 font-semibold">Nama Produk</th>
+                    <th className="py-3 px-4 font-semibold text-right">Stok Akhir</th>
+                    <th className="py-3 px-4 font-semibold text-right">Terjual (Periode)</th>
+                    <th className="py-3 px-4 font-semibold text-right">Rasio Perputaran</th>
+                    <th className="py-3 px-4 font-semibold text-right">Valuasi Stok (HPP)</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
+                </thead>
+                <tbody className="tabular-nums">
+                  {turnoverRows.map((r) => (
+                    <tr key={r.sku} className="hig-row-hover">
+                      <td className="py-3 px-4 font-mono whitespace-nowrap">{r.sku}</td>
+                      <td className="py-3 px-4 font-bold">{r.name}</td>
+                      <td className="py-3 px-4 text-right">
+                        {r.currentStock} {r.unit}
+                      </td>
+                      <td className="py-3 px-4 text-right font-semibold">
+                        {r.qtySold} {r.unit}
+                      </td>
+                      <td
+                        style={{ color: 'var(--accent-primary-text)' }}
+                        className="py-3 px-4 text-right font-bold"
+                      >
+                        {r.turnoverRate}x
+                      </td>
+                      <td className="py-3 px-4 text-right font-bold">
+                        {formatRupiah(r.hppStockValue)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            ))}
         </div>
       </div>
     </div>

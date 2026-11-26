@@ -4,10 +4,12 @@ export type Permission =
   | 'view:dashboard'
   | 'view:pos'
   | 'view:warehouse'
+  | 'view:purchases'
   | 'view:transactions'
   | 'view:receivables'
   | 'view:products'
   | 'view:customers'
+  | 'view:expenses'
   | 'view:reports'
   | 'view:audit'
   | 'view:users'
@@ -15,6 +17,8 @@ export type Permission =
   | 'pos:checkout'
   | 'pos:quick_customer'
   | 'warehouse:adjust'
+  | 'purchases:manage'
+  | 'expenses:manage'
   | 'transactions:void'
   | 'receivables:pay'
   | 'receivables:create'
@@ -33,10 +37,12 @@ const ROLE_PERMISSIONS: Record<Role, ReadonlySet<Permission>> = {
     'view:dashboard',
     'view:pos',
     'view:warehouse',
+    'view:purchases',
     'view:transactions',
     'view:receivables',
     'view:products',
     'view:customers',
+    'view:expenses',
     'view:reports',
     'view:audit',
     'view:users',
@@ -44,6 +50,8 @@ const ROLE_PERMISSIONS: Record<Role, ReadonlySet<Permission>> = {
     'pos:checkout',
     'pos:quick_customer',
     'warehouse:adjust',
+    'purchases:manage',
+    'expenses:manage',
     'transactions:void',
     'receivables:pay',
     'receivables:create',
@@ -61,16 +69,20 @@ const ROLE_PERMISSIONS: Record<Role, ReadonlySet<Permission>> = {
     'view:dashboard',
     'view:pos',
     'view:warehouse',
+    'view:purchases',
     'view:transactions',
     'view:receivables',
     'view:products',
     'view:customers',
+    'view:expenses',
     'view:reports',
     'view:audit',
     'view:settings',
     'pos:checkout',
     'pos:quick_customer',
     'warehouse:adjust',
+    'purchases:manage',
+    'expenses:manage',
     'transactions:void',
     'receivables:pay',
     'receivables:create',
@@ -91,10 +103,12 @@ const ROLE_PERMISSIONS: Record<Role, ReadonlySet<Permission>> = {
   OWNER: new Set<Permission>([
     'view:dashboard',
     'view:warehouse',
+    'view:purchases',
     'view:transactions',
     'view:receivables',
     'view:products',
     'view:customers',
+    'view:expenses',
     'view:reports',
     'view:audit',
     'products:view_cost',
@@ -104,7 +118,7 @@ const ROLE_PERMISSIONS: Record<Role, ReadonlySet<Permission>> = {
 
 export function hasPermission(role: Role | undefined | null, permission: Permission): boolean {
   if (!role) return false;
-  return ROLE_PERMISSIONS[role].has(permission);
+  return ROLE_PERMISSIONS[role]?.has(permission) ?? false;
 }
 
 export function getDefaultViewForRole(role: Role): AppView {

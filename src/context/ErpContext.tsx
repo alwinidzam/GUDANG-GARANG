@@ -1,22 +1,33 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { getDefaultViewForRole, hasPermission, Permission } from '../lib/rbac';
-import { createSeedData } from '../lib/seedData';
+import { createEmptyDatabase, createInitialDatabase } from '../lib/seedData';
 import { hashPassword, toLocalDateISO } from '../lib/format';
 import * as engine from '../lib/storeEngine';
 import { CsvProductRow } from '../lib/csv';
 import {
   AppView,
+  CashierShift,
   CompanySettings,
   Customer,
   DatabaseState,
+  HoldOrder,
   InstallmentPaymentRecord,
   PaymentPlan,
   PrintRequest,
+  PurchaseOrder,
+  ShippingStatus,
+  Supplier,
   Transaction,
   User,
 } from '../types/erp';
 
-const DB_STORAGE_KEY = 'indobacco_erp_v1';
+const LEGACY_DB_STORAGE_KEYS = [
+  'indobacco_erp_v1',
+  'indobacco_erp_v2',
+  'indobacco_erp_v3',
+  'indobacco_erp_v4',
+];
+const DB_STORAGE_KEY = 'indobacco_erp_v5';
 const SESSION_STORAGE_KEY = 'indobacco_session_user_v1';
 
 export interface ToastMessage {
@@ -32,7 +43,6 @@ interface ErpContextValue {
   setActiveView: (view: AppView) => void;
   can: (permission: Permission) => boolean;
   login: (username: string, password: string) => void;
-  quickDemoLogin: (userId: string) => void;
   logout: () => void;
   printRequest: PrintRequest | null;
   openPrint: (req: PrintRequest) => void;
@@ -44,48 +54,72 @@ interface ErpContextValue {
   // Domain actions
   createSale: (input: engine.CreateSaleInput) => { transaction: Transaction; paymentPlan?: PaymentPlan };
   voidTransaction: (txId: string, reason: string) => void;
+  createPartialReturn: (input: engine.PartialReturnInput) => void;
+  updateTransactionShipping: (input: {
+    txId: string;
+    shippingStatus: ShippingStatus;
+    courierName?: string;
+    trackingNumber?: string;
+  }) => void;
   adjustStock: (input: engine.AdjustStockInput) => void;
   recordInstallmentPayment: (
     input: engine.RecordInstallmentPaymentInput
   ) => { payment: InstallmentPaymentRecord; plan: PaymentPlan };
+  recordCustomerBulkPayment: (input: engine.CustomerBulkPaymentInput) => {
+    settledCount: number;
+    affectedPlans: PaymentPlan[];
+    receipts: InstallmentPaymentRecord[];
+  };
   createManualPaymentPlan: (input: engine.CreateManualPlanInput) => PaymentPlan;
   upsertProduct: (input: engine.UpsertProductInput) => void;
+  bulkUpdateProducts: (patches: engine.BulkProductPatch[]) => number;
   deleteProduct: (productId: string) => void;
   importProductsBulk: (rows: CsvProductRow[]) => { inserted: number; updated: number };
   upsertCustomer: (input: engine.UpsertCustomerInput) => Customer;
   deleteCustomer: (customerId: string) => void;
+  upsertSupplier: (input: engine.UpsertSupplierInput) => Supplier;
+  deleteSupplier: (supplierId: string) => void;
+  createPurchaseOrder: (input: engine.CreatePurchaseOrderInput) => PurchaseOrder;
+  payPurchaseOrder: (input: {
+    poId: string;
+    amount: number;
+    paymentMethod: 'CASH' | 'TRANSFER' | 'QRIS';
+    notes?: string;
+  }) => void;
+  createExpense: (input: engine.CreateExpenseInput) => void;
+  deleteExpense: (expenseId: string) => void;
+  saveHoldOrder: (input: Omit<HoldOrder, 'id' | 'createdAt'>) => void;
+  deleteHoldOrder: (holdId: string) => void;
+  openCashierShift: (openingCash: number, notes?: string) => void;
+  closeCashierShift: (actualCash: number, notes?: string) => CashierShift;
   upsertUser: (input: engine.UpsertUserInput) => void;
   deleteUser: (userId: string) => void;
   updateSettings: (partial: Partial<CompanySettings>) => void;
   exportBackupJson: () => void;
   restoreBackupJson: (parsed: unknown) => void;
-  resetDemoData: () => void;
+  resetOperationalData: () => void;
+  clearAllData: () => void;
 }
 
 const ErpContext = createContext<ErpContextValue | null>(null);
 
 function loadInitialDb(): DatabaseState {
   try {
-    const raw = localStorage.getItem(DB_STORAGE_KEY);
-    if (!raw) return createSeedData();
-    const parsed = JSON.parse(raw) as Partial<DatabaseState>;
-    if (
-      parsed &&
-      parsed.schemaVersion === 1 &&
-      Array.isArray(parsed.users) &&
-      Array.isArray(parsed.products) &&
-      Array.isArray(parsed.customers) &&
-      Array.isArray(parsed.transactions) &&
-      Array.isArray(parsed.stockMovements) &&
-      Array.isArray(parsed.paymentPlans) &&
-      Array.isArray(parsed.auditLogs) &&
-      parsed.settings
-    ) {
-      return parsed as DatabaseState;
+    // Clean up prior demo/empty storage keys when initializing production product catalog
+    for (const legacyKey of LEGACY_DB_STORAGE_KEYS) {
+      if (localStorage.getItem(legacyKey)) {
+        localStorage.removeItem(legacyKey);
+      }
     }
-    return createSeedData();
+    const raw = localStorage.getItem(DB_STORAGE_KEY);
+    if (!raw) return createInitialDatabase();
+    const parsed: unknown = JSON.parse(raw);
+    if (engine.isValidDatabaseState(parsed)) {
+      return parsed;
+    }
+    return createInitialDatabase();
   } catch {
-    return createSeedData();
+    return createInitialDatabase();
   }
 }
 
@@ -127,6 +161,26 @@ export const ErpProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       // Ignore storage access errors
     }
   }, [sessionUserId]);
+
+  // Keep multiple open browser tabs synchronized via localStorage events
+  useEffect(() => {
+    const handleStorage = (e: StorageEvent) => {
+      if (e.key === DB_STORAGE_KEY && e.newValue) {
+        try {
+          const parsed: unknown = JSON.parse(e.newValue);
+          if (engine.isValidDatabaseState(parsed)) {
+            setDb(parsed);
+          }
+        } catch {
+          // Ignore malformed external writes
+        }
+      } else if (e.key === SESSION_STORAGE_KEY) {
+        setSessionUserId(e.newValue);
+      }
+    };
+    window.addEventListener('storage', handleStorage);
+    return () => window.removeEventListener('storage', handleStorage);
+  }, []);
 
   // Ensure initial route matches role on reload
   useEffect(() => {
@@ -184,19 +238,6 @@ export const ErpProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     [db.users, showToast]
   );
 
-  const quickDemoLogin = useCallback(
-    (userId: string) => {
-      const found = db.users.find((u) => u.id === userId && u.isActive);
-      if (!found) {
-        throw new Error('Akun demo tidak tersedia atau nonaktif.');
-      }
-      setSessionUserId(found.id);
-      setActiveView(getDefaultViewForRole(found.role));
-      showToast('info', `Masuk sebagai ${found.name} (${found.role}).`);
-    },
-    [db.users, showToast]
-  );
-
   const logout = useCallback(() => {
     setSessionUserId(null);
     setPrintRequest(null);
@@ -231,6 +272,31 @@ export const ErpProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     [db, requireActor, showToast]
   );
 
+  const createPartialReturn = useCallback(
+    (input: engine.PartialReturnInput) => {
+      const actor = requireActor();
+      const next = engine.createPartialReturn(db, actor, input);
+      setDb(next);
+      showToast('success', 'Retur sebagian dicatat & stok barang dikembalikan ke gudang.');
+    },
+    [db, requireActor, showToast]
+  );
+
+  const updateTransactionShipping = useCallback(
+    (input: {
+      txId: string;
+      shippingStatus: ShippingStatus;
+      courierName?: string;
+      trackingNumber?: string;
+    }) => {
+      const actor = requireActor();
+      const next = engine.updateTransactionShipping(db, actor, input);
+      setDb(next);
+      showToast('success', 'Status pengiriman & nomor resi diperbarui.');
+    },
+    [db, requireActor, showToast]
+  );
+
   const adjustStock = useCallback(
     (input: engine.AdjustStockInput) => {
       const actor = requireActor();
@@ -252,6 +318,24 @@ export const ErpProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     [db, requireActor, showToast]
   );
 
+  const recordCustomerBulkPayment = useCallback(
+    (input: engine.CustomerBulkPaymentInput) => {
+      const actor = requireActor();
+      const res = engine.recordCustomerBulkPayment(db, actor, input);
+      setDb(res.state);
+      showToast(
+        'success',
+        `Transfer dialokasikan otomatis ke ${res.affectedPlans.length} nota (${res.settledCount} lunas).`
+      );
+      return {
+        settledCount: res.settledCount,
+        affectedPlans: res.affectedPlans,
+        receipts: res.receipts,
+      };
+    },
+    [db, requireActor, showToast]
+  );
+
   const createManualPaymentPlan = useCallback(
     (input: engine.CreateManualPlanInput) => {
       const actor = requireActor();
@@ -269,6 +353,17 @@ export const ErpProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const next = engine.upsertProduct(db, actor, input);
       setDb(next);
       showToast('success', input.id ? 'Produk berhasil diperbarui.' : 'Produk baru ditambahkan.');
+    },
+    [db, requireActor, showToast]
+  );
+
+  const bulkUpdateProducts = useCallback(
+    (patches: engine.BulkProductPatch[]) => {
+      const actor = requireActor();
+      const res = engine.bulkUpdateProducts(db, actor, patches);
+      setDb(res.state);
+      showToast('success', `Edit massal berhasil menyimpan ${res.updatedCount} SKU.`);
+      return res.updatedCount;
     },
     [db, requireActor, showToast]
   );
@@ -318,6 +413,111 @@ export const ErpProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     [db, requireActor, showToast]
   );
 
+  const upsertSupplier = useCallback(
+    (input: engine.UpsertSupplierInput) => {
+      const actor = requireActor();
+      const res = engine.upsertSupplier(db, actor, input);
+      setDb(res.state);
+      showToast('success', input.id ? 'Data supplier diperbarui.' : 'Supplier baru ditambahkan.');
+      return res.supplier;
+    },
+    [db, requireActor, showToast]
+  );
+
+  const deleteSupplier = useCallback(
+    (supplierId: string) => {
+      const actor = requireActor();
+      const next = engine.deleteSupplier(db, actor, supplierId);
+      setDb(next);
+      showToast('success', 'Supplier dihapus.');
+    },
+    [db, requireActor, showToast]
+  );
+
+  const createPurchaseOrder = useCallback(
+    (input: engine.CreatePurchaseOrderInput) => {
+      const actor = requireActor();
+      const res = engine.createPurchaseOrder(db, actor, input);
+      setDb(res.state);
+      showToast('success', `PO ${res.po.poNumber} tersimpan, stok & HPP otomatis diperbarui.`);
+      return res.po;
+    },
+    [db, requireActor, showToast]
+  );
+
+  const payPurchaseOrder = useCallback(
+    (input: {
+      poId: string;
+      amount: number;
+      paymentMethod: 'CASH' | 'TRANSFER' | 'QRIS';
+      notes?: string;
+    }) => {
+      const actor = requireActor();
+      const next = engine.payPurchaseOrder(db, actor, input);
+      setDb(next);
+      showToast('success', 'Pembayaran hutang supplier berhasil dicatat.');
+    },
+    [db, requireActor, showToast]
+  );
+
+  const createExpense = useCallback(
+    (input: engine.CreateExpenseInput) => {
+      const actor = requireActor();
+      const next = engine.createExpense(db, actor, input);
+      setDb(next);
+      showToast('success', 'Pengeluaran operasional berhasil dicatat.');
+    },
+    [db, requireActor, showToast]
+  );
+
+  const deleteExpense = useCallback(
+    (expenseId: string) => {
+      const actor = requireActor();
+      const next = engine.deleteExpense(db, actor, expenseId);
+      setDb(next);
+      showToast('success', 'Catatan pengeluaran dihapus.');
+    },
+    [db, requireActor, showToast]
+  );
+
+  const saveHoldOrder = useCallback(
+    (input: Omit<HoldOrder, 'id' | 'createdAt'>) => {
+      const actor = requireActor();
+      const next = engine.saveHoldOrder(db, actor, input);
+      setDb(next);
+      showToast('info', 'Keranjang disimpan ke daftar Pesanan Ditahan.');
+    },
+    [db, requireActor, showToast]
+  );
+
+  const deleteHoldOrder = useCallback(
+    (holdId: string) => {
+      setDb((prev) => engine.deleteHoldOrder(prev, holdId));
+    },
+    []
+  );
+
+  const openCashierShift = useCallback(
+    (openingCash: number, notes?: string) => {
+      const actor = requireActor();
+      const next = engine.openCashierShift(db, actor, openingCash, notes);
+      setDb(next);
+      showToast('success', 'Shift kasir dibuka.');
+    },
+    [db, requireActor, showToast]
+  );
+
+  const closeCashierShift = useCallback(
+    (actualCash: number, notes?: string) => {
+      const actor = requireActor();
+      const res = engine.closeCashierShift(db, actor, actualCash, notes);
+      setDb(res.state);
+      showToast('success', 'Shift kasir ditutup & direkonsiliasi.');
+      return res.closedShift;
+    },
+    [db, requireActor, showToast]
+  );
+
   const upsertUser = useCallback(
     (input: engine.UpsertUserInput) => {
       const actor = requireActor();
@@ -353,7 +553,13 @@ export const ErpProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (!hasPermission(actor.role, 'backup:manage')) {
       throw new Error('Hanya Super Admin yang dapat mengekspor backup basis data.');
     }
-    const payload = JSON.stringify(db, null, 2);
+    const nowIso = new Date().toISOString();
+    const stampedDb: DatabaseState = {
+      ...db,
+      settings: { ...db.settings, lastBackupAt: nowIso },
+    };
+    setDb(stampedDb);
+    const payload = JSON.stringify(stampedDb, null, 2);
     const blob = new Blob([payload], { type: 'application/json;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -376,16 +582,56 @@ export const ErpProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     [requireActor, showToast]
   );
 
-  const resetDemoData = useCallback(() => {
+  const resetOperationalData = useCallback(() => {
     const actor = requireActor();
     if (!hasPermission(actor.role, 'backup:manage')) {
-      throw new Error('Hanya Super Admin yang dapat mereset data demo.');
+      throw new Error('Hanya Super Admin yang dapat mereset data operasional.');
     }
-    const fresh = createSeedData();
-    setDb(fresh);
-    setSessionUserId('usr_admin');
+    setDb((prev) => ({
+      ...prev,
+      customers: [],
+      transactions: [],
+      stockMovements: [],
+      paymentPlans: [],
+      auditLogs: [],
+      suppliers: [],
+      purchaseOrders: [],
+      expenses: [],
+      holdOrders: [],
+      shifts: [],
+      settings: {
+        ...prev.settings,
+        nextInvoiceSeq: 1,
+        nextReceiptSeq: 1,
+        nextSuratJalanSeq: 1,
+        nextPlanSeq: 1,
+        nextPoSeq: 1,
+      },
+    }));
     setActiveView('dashboard');
-    showToast('info', 'Basis data dikembalikan ke data awal Indobacco.');
+    showToast('info', 'Data operasional dikosongkan. Master produk & akun tetap aman.');
+  }, [requireActor, showToast]);
+
+  const clearAllData = useCallback(() => {
+    const actor = requireActor();
+    if (!hasPermission(actor.role, 'backup:manage')) {
+      throw new Error('Hanya Super Admin yang dapat mengosongkan seluruh data.');
+    }
+    const fresh = createEmptyDatabase();
+    setDb((prev) => ({
+      ...fresh,
+      users: prev.users,
+      settings: {
+        ...prev.settings,
+        nextInvoiceSeq: 1,
+        nextReceiptSeq: 1,
+        nextSuratJalanSeq: 1,
+        nextPlanSeq: 1,
+        nextPoSeq: 1,
+      },
+    }));
+    setActiveView('dashboard');
+    showToast('info', 'Seluruh produk dan data operasional telah dikosongkan.');
   }, [requireActor, showToast]);
 
   const value: ErpContextValue = {
@@ -395,7 +641,6 @@ export const ErpProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setActiveView,
     can,
     login,
-    quickDemoLogin,
     logout,
     printRequest,
     openPrint,
@@ -405,20 +650,35 @@ export const ErpProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     dismissToast,
     createSale,
     voidTransaction,
+    createPartialReturn,
+    updateTransactionShipping,
     adjustStock,
     recordInstallmentPayment,
+    recordCustomerBulkPayment,
     createManualPaymentPlan,
     upsertProduct,
+    bulkUpdateProducts,
     deleteProduct,
     importProductsBulk,
     upsertCustomer,
     deleteCustomer,
+    upsertSupplier,
+    deleteSupplier,
+    createPurchaseOrder,
+    payPurchaseOrder,
+    createExpense,
+    deleteExpense,
+    saveHoldOrder,
+    deleteHoldOrder,
+    openCashierShift,
+    closeCashierShift,
     upsertUser,
     deleteUser,
     updateSettings,
     exportBackupJson,
     restoreBackupJson,
-    resetDemoData,
+    resetOperationalData,
+    clearAllData,
   };
 
   return <ErpContext.Provider value={value}>{children}</ErpContext.Provider>;

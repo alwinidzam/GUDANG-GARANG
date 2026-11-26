@@ -7,7 +7,25 @@ export function formatRupiah(amount: number): string {
 
 export function formatNumber(amount: number): string {
   const safe = Number.isFinite(amount) ? amount : 0;
-  return safe.toLocaleString('id-ID');
+  return safe.toLocaleString('id-ID', { maximumFractionDigits: 3 });
+}
+
+export function roundQty(qty: number): number {
+  if (!Number.isFinite(qty)) return 0;
+  return Math.round(qty * 1000) / 1000;
+}
+
+export function formatWhatsAppUrl(phone: string | undefined, message: string): string {
+  const digits = (phone || '').replace(/\D/g, '');
+  const normalized = digits.startsWith('0')
+    ? `62${digits.slice(1)}`
+    : digits.startsWith('62')
+    ? digits
+    : digits
+    ? `62${digits}`
+    : '';
+  const encoded = encodeURIComponent(message);
+  return normalized ? `https://wa.me/${normalized}?text=${encoded}` : `https://wa.me/?text=${encoded}`;
 }
 
 export function toLocalDateISO(date: Date = new Date()): string {
@@ -148,6 +166,7 @@ function terbilangCore(n: number): string {
 }
 
 export function terbilangRupiah(amount: number): string {
+  if (!Number.isFinite(amount)) return 'Nol Rupiah';
   const safe = Math.round(amount);
   if (safe === 0) return 'Nol Rupiah';
   if (safe < 0) return `Minus ${terbilangCore(Math.abs(safe)).trim()} Rupiah`;

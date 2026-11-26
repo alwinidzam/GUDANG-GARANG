@@ -2,7 +2,12 @@ import { CustomerType } from '../types/erp';
 
 export function escapeCsvCell(value: string | number | boolean | null | undefined): string {
   if (value === null || value === undefined) return '';
-  const str = String(value);
+  let str = String(value);
+  // Neutralize spreadsheet formula injection (=, +, -, @, tab, CR) on non-numeric strings
+  const isPureNumber = typeof value === 'number' || /^-?\d+(\.\d+)?$/.test(str.trim());
+  if (!isPureNumber && /^[=+\-@\t\r]/.test(str)) {
+    str = `'${str}`;
+  }
   if (/[",\r\n]/.test(str)) {
     return `"${str.replace(/"/g, '""')}"`;
   }
@@ -113,6 +118,16 @@ export const PRODUCT_CSV_HEADERS = [
   'description',
 ];
 
+function parseFlexibleNumber(raw: string): number {
+  const trimmed = raw.trim().replace(/^rp\.?\s*/i, '');
+  if (!trimmed) return 0;
+  // Treat Indonesian dot-grouped thousands (e.g. 125.000 or 1.250.000) as integers
+  if (/^-?\d{1,3}(\.\d{3})+$/.test(trimmed)) {
+    return Number(trimmed.replace(/\./g, ''));
+  }
+  return Number(trimmed.replace(/[^\d.-]/g, ''));
+}
+
 export function parseProductsCsv(text: string): CsvProductParseResult {
   const rows = parseCsv(text);
   if (rows.length < 2) {
@@ -141,20 +156,20 @@ export function parseProductsCsv(text: string): CsvProductParseResult {
   for (let i = 1; i < rows.length; i += 1) {
     const r = rows[i];
     const lineNo = i + 1;
-    const sku = getCol(r, 'sku', 'kodesku').toUpperCase();
-    const name = getCol(r, 'name', 'namaproduk', 'produk');
-    const category = getCol(r, 'category', 'kategori') || 'Tembakau Rajangan';
-    const unit = getCol(r, 'unit', 'satuan') || 'Bungkus';
+    const sku = getCol(r, 'sku', 'kodesku', 'kodebarang', 'kode').toUpperCase();
+    const name = getCol(r, 'name', 'namaproduk', 'namabarang', 'produk');
+    const category = getCol(r, 'category', 'kategori') || 'Tembakau Flavour';
+    const unit = getCol(r, 'unit', 'satuan') || 'Kg';
     const costRaw = getCol(r, 'costprice', 'hpp', 'hargabeli');
     const sellRaw = getCol(r, 'sellprice', 'hargajual', 'harga');
     const stockRaw = getCol(r, 'stock', 'stok') || '0';
-    const minStockRaw = getCol(r, 'minstock', 'stokminimum', 'minstok') || '5';
+    const minStockRaw = getCol(r, 'minstock', 'stokminimum', 'minstok') || '0';
     const description = getCol(r, 'description', 'deskripsi', 'catatan');
 
-    const costPrice = Number(costRaw.replace(/[^\d.-]/g, ''));
-    const sellPrice = Number(sellRaw.replace(/[^\d.-]/g, ''));
-    const stock = Number(stockRaw.replace(/[^\d.-]/g, ''));
-    const minStock = Number(minStockRaw.replace(/[^\d.-]/g, ''));
+    const costPrice = parseFlexibleNumber(costRaw);
+    const sellPrice = parseFlexibleNumber(sellRaw);
+    const stock = parseFlexibleNumber(stockRaw);
+    const minStock = parseFlexibleNumber(minStockRaw);
 
     if (!sku || !name) {
       errors.push(`Baris ${lineNo}: SKU dan Nama Produk wajib diisi.`);
@@ -168,12 +183,12 @@ export function parseProductsCsv(text: string): CsvProductParseResult {
       errors.push(`Baris ${lineNo} (${sku}): Harga Jual harus > 0.`);
       continue;
     }
-    if (!Number.isFinite(stock) || stock < 0 || !Number.isInteger(stock)) {
-      errors.push(`Baris ${lineNo} (${sku}): Stok harus bilangan bulat >= 0.`);
+    if (!Number.isFinite(stock) || stock < 0) {
+      errors.push(`Baris ${lineNo} (${sku}): Stok harus angka >= 0.`);
       continue;
     }
-    if (!Number.isFinite(minStock) || minStock < 0 || !Number.isInteger(minStock)) {
-      errors.push(`Baris ${lineNo} (${sku}): Stok Minimum harus bilangan bulat >= 0.`);
+    if (!Number.isFinite(minStock) || minStock < 0) {
+      errors.push(`Baris ${lineNo} (${sku}): Stok Minimum harus angka >= 0.`);
       continue;
     }
 
@@ -184,8 +199,8 @@ export function parseProductsCsv(text: string): CsvProductParseResult {
       unit,
       costPrice: Math.round(costPrice),
       sellPrice: Math.round(sellPrice),
-      stock,
-      minStock,
+      stock: Math.round(stock * 1000) / 1000,
+      minStock: Math.round(minStock * 1000) / 1000,
       description: description || undefined,
     });
   }

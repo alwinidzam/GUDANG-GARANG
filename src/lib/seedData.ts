@@ -1,5 +1,6 @@
 import { buildInstallmentSchedule } from './calculations';
 import { addDaysISO, hashPassword, padSeq, toLocalDateISO } from './format';
+import { createCatalogProducts } from './productCatalog';
 import {
   AuditLog,
   CompanySettings,
@@ -14,15 +15,8 @@ import {
   User,
 } from '../types/erp';
 
-export function createSeedData(baseDate: Date = new Date()): DatabaseState {
-  const today = toLocalDateISO(baseDate);
-  const tsAt = (daysOffset: number, hour = 10, minute = 15): string => {
-    const dStr = addDaysISO(today, daysOffset);
-    return `${dStr}T${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}:00`;
-  };
-  const ym = today.slice(0, 7).replace('-', '');
-
-  const users: User[] = [
+function createDefaultUsers(tsAt: (daysOffset: number, hour?: number, minute?: number) => string): User[] {
+  return [
     {
       id: 'usr_admin',
       username: 'admin',
@@ -60,6 +54,69 @@ export function createSeedData(baseDate: Date = new Date()): DatabaseState {
       createdAt: tsAt(-60, 8, 0),
     },
   ];
+}
+
+export function createEmptyDatabase(baseDate: Date = new Date()): DatabaseState {
+  const today = toLocalDateISO(baseDate);
+  const tsAt = (daysOffset: number, hour = 10, minute = 15): string => {
+    const dStr = addDaysISO(today, daysOffset);
+    return `${dStr}T${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}:00`;
+  };
+
+  return {
+    schemaVersion: 1,
+    users: createDefaultUsers(tsAt),
+    products: [],
+    customers: [],
+    transactions: [],
+    stockMovements: [],
+    paymentPlans: [],
+    auditLogs: [],
+    suppliers: [],
+    purchaseOrders: [],
+    expenses: [],
+    holdOrders: [],
+    shifts: [],
+    settings: {
+      companyName: 'PT Indobacco Tingwe Nusantara',
+      tagline: 'Tingwe Tobacco Premium: Go International',
+      address: 'Jl. Raya Industri Tembakau No. 45, Temanggung, Jawa Tengah 56212',
+      phone: '(0293) 491-880 / WA 0811-2900-450',
+      email: 'operasional@indobacco.co.id',
+      bankName: '',
+      bankAccountNumber: '',
+      bankAccountHolder: '',
+      taxRate: 11,
+      invoicePrefix: 'IDB',
+      dailyTarget: 6500000,
+      receiptFooter: 'Terima kasih telah mempercayai kualitas Indobacco Tingwe Premium.',
+      nextInvoiceSeq: 1,
+      nextReceiptSeq: 1,
+      nextSuratJalanSeq: 1,
+      nextPlanSeq: 1,
+      nextPoSeq: 1,
+    },
+  };
+}
+
+export function createInitialDatabase(baseDate: Date = new Date()): DatabaseState {
+  const empty = createEmptyDatabase(baseDate);
+  const today = toLocalDateISO(baseDate);
+  return {
+    ...empty,
+    products: createCatalogProducts(`${today}T09:00:00`),
+  };
+}
+
+export function createSeedData(baseDate: Date = new Date()): DatabaseState {
+  const today = toLocalDateISO(baseDate);
+  const tsAt = (daysOffset: number, hour = 10, minute = 15): string => {
+    const dStr = addDaysISO(today, daysOffset);
+    return `${dStr}T${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}:00`;
+  };
+  const ym = today.slice(0, 7).replace('-', '');
+
+  const users: User[] = createDefaultUsers(tsAt);
 
   const products: Product[] = [
     {
@@ -765,7 +822,7 @@ export function createSeedData(baseDate: Date = new Date()): DatabaseState {
 
   const settings: CompanySettings = {
     companyName: 'PT Indobacco Tingwe Nusantara',
-    tagline: 'Tingwe Tobacco Premium — Go International',
+    tagline: 'Tingwe Tobacco Premium: Go International',
     address: 'Jl. Raya Industri Tembakau No. 45, Temanggung, Jawa Tengah 56212',
     phone: '(0293) 491-880 / WA 0811-2900-450',
     email: 'operasional@indobacco.co.id',
@@ -788,6 +845,11 @@ export function createSeedData(baseDate: Date = new Date()): DatabaseState {
     stockMovements,
     paymentPlans,
     auditLogs,
+    suppliers: [],
+    purchaseOrders: [],
+    expenses: [],
+    holdOrders: [],
+    shifts: [],
     settings,
   };
 }

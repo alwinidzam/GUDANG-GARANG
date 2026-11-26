@@ -1,10 +1,21 @@
 import {
+  CustomerType,
   InstallmentFrequency,
   InstallmentItem,
   PaymentPlan,
   Product,
 } from '../types/erp';
-import { addDaysISO, addMonthsISO, diffDays, toLocalDateISO } from './format';
+import { addDaysISO, addMonthsISO, diffDays, roundQty, toLocalDateISO } from './format';
+
+export function getEffectiveUnitPrice(product: Product, customerType?: CustomerType | null): number {
+  if (customerType === 'DISTRIBUTOR' && product.distributorPrice && product.distributorPrice > 0) {
+    return product.distributorPrice;
+  }
+  if (customerType === 'GROSIR' && product.wholesalePrice && product.wholesalePrice > 0) {
+    return product.wholesalePrice;
+  }
+  return product.sellPrice;
+}
 
 export function calcMarginPercent(costPrice: number, sellPrice: number): number {
   if (sellPrice <= 0) return 0;
@@ -54,7 +65,7 @@ export function calcInventoryValuation(products: Product[]): InventoryValuation 
     totalHppValue: Math.round(totalHppValue),
     totalRetailValue: Math.round(totalRetailValue),
     potentialProfit: Math.round(totalRetailValue - totalHppValue),
-    totalUnits,
+    totalUnits: roundQty(totalUnits),
     skuCount: products.length,
     lowStockCount,
     outOfStockCount,
@@ -67,6 +78,7 @@ export interface InstallmentScheduleInput {
   interestRate: number;
   frequency: InstallmentFrequency;
   tenorCount: number;
+  tempoDays?: number;
   startDate?: string;
 }
 
@@ -84,7 +96,9 @@ export function buildInstallmentSchedule(
   const principal = Math.round(input.principalAmount);
   const dp = Math.round(input.downPayment);
   const rate = Number(input.interestRate);
-  const tenor = Math.floor(input.tenorCount);
+  const isFlexible = input.frequency === 'FLEXIBLE';
+  const tenor = isFlexible ? 1 : Math.floor(input.tenorCount);
+  const tempoDays = Math.max(1, Math.min(365, Math.floor(input.tempoDays || 30)));
   const startDate = (input.startDate || toLocalDateISO()).slice(0, 10);
 
   if (principal <= 0) {
@@ -99,13 +113,30 @@ export function buildInstallmentSchedule(
   if (rate < 0 || Number.isNaN(rate)) {
     throw new Error('Persentase bunga tidak valid.');
   }
-  if (tenor < 1 || tenor > 60) {
+  if (!isFlexible && (tenor < 1 || tenor > 60)) {
     throw new Error('Jumlah tenor harus antara 1 sampai 60 termin.');
   }
 
   const financedAmount = principal - dp;
   const interestAmount = Math.round(financedAmount * (rate / 100));
   const totalPayable = financedAmount + interestAmount;
+
+  if (isFlexible) {
+    return {
+      financedAmount,
+      interestAmount,
+      totalPayable,
+      installmentBaseAmount: totalPayable,
+      schedule: [
+        {
+          index: 1,
+          dueDate: addDaysISO(startDate, tempoDays),
+          amount: totalPayable,
+          paidAmount: 0,
+        },
+      ],
+    };
+  }
 
   const baseAmount = Math.floor(totalPayable / tenor);
   const remainder = totalPayable - baseAmount * tenor;
@@ -213,5 +244,96 @@ export function getPlanMetrics(
     isOverdue: plan.status === 'ACTIVE' && overdueInstallmentCount > 0,
     nextDueDate: plan.status === 'ACTIVE' ? nextDueDate : null,
     paidCount,
+  };
+}
+
+export interface ReceivablesAgingBuckets {
+  current: number;
+  days1To30: number;
+  days31To60: number;
+  over60: number;
+}
+
+export function calcReceivablesAging(
+  plans: PaymentPlan[],
+  todayIso: string = toLocalDateISO()
+): ReceivablesAgingBuckets {
+  const buckets: ReceivablesAgingBuckets = {
+    current: 0,
+    days1To30: 0,
+    days31To60: 0,
+    over60: 0,
+  };
+  for (const pl of plans) {
+    if (pl.status !== 'ACTIVE') continue;
+    for (const item of pl.schedule) {
+      const st = getInstallmentStatus(item, todayIso);
+      if (st.remaining <= 0) continue;
+      if (st.status !== 'OVERDUE' || st.overdueDays <= 0) {
+        buckets.current += st.remaining;
+      } else if (st.overdueDays <= 30) {
+        buckets.days1To30 += st.remaining;
+      } else if (st.overdueDays <= 60) {
+        buckets.days31To60 += st.remaining;
+      } else {
+        buckets.over60 += st.remaining;
+      }
+    }
+  }
+  return buckets;
+}
+
+export interface FifoAllocationLine {
+  plan: PaymentPlan;
+  remainingBefore: number;
+  allocatedAmount: number;
+  remainingAfter: number;
+  willSettle: boolean;
+}
+
+/**
+ * Deterministic FIFO allocation across a customer's ACTIVE credit plans (oldest due date / overdue first).
+ */
+export function previewCustomerFifoAllocation(
+  plans: PaymentPlan[],
+  customerId: string,
+  paymentAmount: number,
+  todayIso: string = toLocalDateISO()
+): { lines: FifoAllocationLine[]; totalRemaining: number; totalAllocated: number; unallocated: number } {
+  const activePlans = plans
+    .filter((pl) => pl.customerId === customerId && pl.status === 'ACTIVE')
+    .map((pl) => ({ plan: pl, metrics: getPlanMetrics(pl, todayIso) }))
+    .filter((x) => x.metrics.remainingBalance > 0)
+    .sort((a, b) => {
+      const dueA = a.metrics.nextDueDate || a.plan.createdAt.slice(0, 10);
+      const dueB = b.metrics.nextDueDate || b.plan.createdAt.slice(0, 10);
+      if (dueA !== dueB) return dueA.localeCompare(dueB);
+      return a.plan.createdAt.localeCompare(b.plan.createdAt);
+    });
+
+  const totalRemaining = activePlans.reduce((sum, x) => sum + x.metrics.remainingBalance, 0);
+  let pool = Math.max(0, Math.round(paymentAmount || 0));
+  const lines: FifoAllocationLine[] = [];
+
+  for (const { plan, metrics } of activePlans) {
+    if (pool <= 0) break;
+    const alloc = Math.min(pool, metrics.remainingBalance);
+    pool -= alloc;
+    const remAfter = Math.max(0, metrics.remainingBalance - alloc);
+    lines.push({
+      plan,
+      remainingBefore: metrics.remainingBalance,
+      allocatedAmount: alloc,
+      remainingAfter: remAfter,
+      willSettle: remAfter === 0,
+    });
+  }
+
+  const totalAllocated = lines.reduce((sum, l) => sum + l.allocatedAmount, 0);
+  return {
+    lines,
+    totalRemaining,
+    totalAllocated,
+    unallocated: Math.max(0, Math.round(paymentAmount || 0) - totalAllocated),
   };
 }
