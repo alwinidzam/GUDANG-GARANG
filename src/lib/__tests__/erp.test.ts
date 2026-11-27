@@ -6,11 +6,12 @@ import {
   calcReceivablesAging,
   getInstallmentStatus,
   getPlanMetrics,
+  getTransactionNetMetrics,
   previewCustomerFifoAllocation,
 } from '../calculations';
 import { escapeCsvCell, parseCsv, parseProductsCsv, toCsv } from '../csv';
 import { terbilangRupiah } from '../format';
-import { getDefaultViewForRole, hasPermission } from '../rbac';
+import { canAccessView, getDefaultViewForRole, hasPermission } from '../rbac';
 import { createEmptyDatabase, createInitialDatabase, createSeedData } from '../seedData';
 import {
   adjustStock,
@@ -28,6 +29,7 @@ import {
   payPurchaseOrder,
   recordCustomerBulkPayment,
   recordInstallmentPayment,
+  updateTransactionShipping,
   upsertCustomer,
   upsertProduct,
   upsertSupplier,
@@ -126,22 +128,49 @@ describe('RBAC Permission Matrix', () => {
     expect(getDefaultViewForRole('OWNER')).toBe('dashboard');
 
     expect(hasPermission('KASIR', 'pos:checkout')).toBe(true);
+    expect(hasPermission('KASIR', 'receivables:pay')).toBe(true);
+    expect(hasPermission('KASIR', 'transactions:shipping')).toBe(true);
+    expect(hasPermission('KASIR', 'receivables:create')).toBe(false);
     expect(hasPermission('KASIR', 'transactions:void')).toBe(false);
     expect(hasPermission('KASIR', 'warehouse:adjust')).toBe(false);
     expect(hasPermission('KASIR', 'products:view_cost')).toBe(false);
+    expect(hasPermission('KASIR', 'reports:export')).toBe(false);
+    expect(canAccessView('KASIR', 'pos')).toBe(true);
+    expect(canAccessView('KASIR', 'receivables')).toBe(true);
+    expect(canAccessView('KASIR', 'dashboard')).toBe(false);
+    expect(canAccessView('KASIR', 'users')).toBe(false);
 
     expect(hasPermission('MANAGER', 'transactions:void')).toBe(true);
     expect(hasPermission('MANAGER', 'warehouse:adjust')).toBe(true);
     expect(hasPermission('MANAGER', 'users:manage')).toBe(false);
     expect(hasPermission('MANAGER', 'backup:manage')).toBe(false);
+    expect(canAccessView('MANAGER', 'settings')).toBe(true);
+    expect(canAccessView('MANAGER', 'users')).toBe(false);
 
     expect(hasPermission('OWNER', 'view:reports')).toBe(true);
     expect(hasPermission('OWNER', 'view:audit')).toBe(true);
     expect(hasPermission('OWNER', 'pos:checkout')).toBe(false);
+    expect(hasPermission('OWNER', 'transactions:shipping')).toBe(false);
     expect(hasPermission('OWNER', 'transactions:void')).toBe(false);
+    expect(hasPermission('OWNER', 'receivables:pay')).toBe(false);
+    expect(canAccessView('OWNER', 'pos')).toBe(false);
+    expect(canAccessView('OWNER', 'settings')).toBe(false);
 
     expect(hasPermission('SUPER_ADMIN', 'users:manage')).toBe(true);
     expect(hasPermission('SUPER_ADMIN', 'backup:manage')).toBe(true);
+    expect(canAccessView('SUPER_ADMIN', 'users')).toBe(true);
+
+    // Runtime engine enforcement: OWNER cannot mutate shipping status
+    const seed = createSeedData(new Date('2026-11-26T10:00:00'));
+    const owner = seed.users.find((u) => u.role === 'OWNER')!;
+    expect(() =>
+      updateTransactionShipping(seed, owner, {
+        txId: seed.transactions[0].id,
+        shippingStatus: 'SHIPPED',
+        courierName: 'JNE',
+        trackingNumber: 'RESI-1',
+      })
+    ).toThrow(/Akses ditolak/i);
   });
 });
 
@@ -302,6 +331,7 @@ describe('Store Engine Transactional Integrity', () => {
     const initial = createInitialDatabase(new Date('2026-11-26T10:00:00'));
     expect(initial.products).toHaveLength(197);
     expect(new Set(initial.products.map((p) => p.sku)).size).toBe(197);
+    expect(initial.products.every((p) => p.stock === 100 && p.minStock === 10)).toBe(true);
     expect(initial.products[0]).toMatchObject({
       sku: 'IB-0001',
       name: 'A MILD',
@@ -637,7 +667,15 @@ describe('Security & Synchronization Regression Suite', () => {
     expect(plan1AfterReturn.returnCreditAmount).toBe(1_250_000);
     expect(plan1AfterReturn.totalPayable).toBe(3_750_000);
     expect(getPlanMetrics(plan1AfterReturn, '2026-11-26').remainingBalance).toBe(3_750_000);
-    expect(afterReturn.products[0].stock).toBe(160);
+    expect(afterReturn.products[0].stock).toBe(260);
+
+    // Net transaction metrics must deduct partial return from revenue, subtotal, and qty
+    const returnedTx = afterReturn.transactions.find((t) => t.id === sale1.transaction.id)!;
+    const netMetrics = getTransactionNetMetrics(returnedTx);
+    expect(netMetrics.returnedTotal).toBe(1_250_000);
+    expect(netMetrics.netTotal).toBe(5_000_000);
+    expect(netMetrics.netSubtotal).toBe(5_000_000);
+    expect(netMetrics.returnedQtyByProduct.get(prod.id)).toBe(10);
 
     // Invoice 2: 40 Kg @ 125,000 = 5,000,000, DP 1,000,000 via CASH, FLEXIBLE 30 days (newer due date)
     const sale2 = createSale(afterReturn, admin, {

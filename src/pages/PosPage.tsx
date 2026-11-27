@@ -60,6 +60,7 @@ export const PosPage: React.FC = () => {
   const [search, setSearch] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('SEMUA');
   const [cart, setCart] = useState<CartRow[]>([]);
+  const [qtyDrafts, setQtyDrafts] = useState<Record<string, string>>({});
   const [customerId, setCustomerId] = useState<string>('');
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('TRANSFER');
   const [dpPaymentMethod, setDpPaymentMethod] = useState<'TRANSFER' | 'CASH' | 'QRIS'>('TRANSFER');
@@ -244,9 +245,17 @@ export const PosPage: React.FC = () => {
     });
   };
 
-  const updateCartQty = (productId: string, rawQty: number) => {
+  const updateCartQty = (productId: string, rawQty: number, preserveDraft = false) => {
     const product = productMap.get(productId);
     if (!product) return;
+    if (!preserveDraft) {
+      setQtyDrafts((prev) => {
+        if (!(productId in prev)) return prev;
+        const next = { ...prev };
+        delete next[productId];
+        return next;
+      });
+    }
     const nextQty = roundQty(rawQty);
     if (!Number.isFinite(nextQty) || nextQty <= 0) {
       setCart((prev) => prev.filter((r) => r.productId !== productId));
@@ -731,8 +740,22 @@ export const PosPage: React.FC = () => {
                         min={0.05}
                         max={product.stock}
                         step="any"
-                        value={qty}
-                        onChange={(e) => updateCartQty(product.id, Number(e.target.value) || 0)}
+                        value={qtyDrafts[product.id] ?? String(qty)}
+                        onChange={(e) => {
+                          const raw = e.target.value;
+                          setQtyDrafts((prev) => ({ ...prev, [product.id]: raw }));
+                          const parsed = Number(raw);
+                          if (raw.trim() !== '' && Number.isFinite(parsed) && parsed > 0) {
+                            updateCartQty(product.id, parsed, true);
+                          }
+                        }}
+                        onBlur={() => {
+                          setQtyDrafts((prev) => {
+                            const next = { ...prev };
+                            delete next[product.id];
+                            return next;
+                          });
+                        }}
                         className="w-14 h-7 text-center text-xs font-bold hig-input tabular-nums"
                       />
                       <button

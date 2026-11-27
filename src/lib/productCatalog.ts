@@ -245,6 +245,9 @@ function inferCategory(name: string): string {
   return 'Tembakau Flavour';
 }
 
+export const DEFAULT_CATALOG_STOCK = 100;
+export const DEFAULT_CATALOG_MIN_STOCK = 10;
+
 export function createCatalogProducts(updatedAt: string): Product[] {
   return RAW_PRODUCT_CATALOG.map(([sku, name, unit, sellPrice], idx) => ({
     id: `prd_${String(idx + 1).padStart(4, '0')}`,
@@ -254,8 +257,8 @@ export function createCatalogProducts(updatedAt: string): Product[] {
     unit,
     costPrice: 0,
     sellPrice,
-    stock: 0,
-    minStock: 0,
+    stock: DEFAULT_CATALOG_STOCK,
+    minStock: DEFAULT_CATALOG_MIN_STOCK,
     updatedAt,
   }));
 }

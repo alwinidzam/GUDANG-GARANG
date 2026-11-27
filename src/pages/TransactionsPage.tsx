@@ -13,6 +13,7 @@ import {
   MessageCircle,
 } from 'lucide-react';
 import { useErp } from '../context/ErpContext';
+import { getTransactionNetMetrics } from '../lib/calculations';
 import { downloadCsv } from '../lib/csv';
 import {
   extractDateISO,
@@ -93,7 +94,7 @@ export const TransactionsPage: React.FC = () => {
 
   const metrics = useMemo(() => {
     const completed = filtered.filter((t) => t.status === 'COMPLETED');
-    const totalRevenue = completed.reduce((acc, t) => acc + t.total, 0);
+    const totalRevenue = completed.reduce((acc, t) => acc + getTransactionNetMetrics(t).netTotal, 0);
     const successRatio =
       filtered.length > 0 ? Math.round((completed.length / filtered.length) * 100) : 0;
     const avgOrder = completed.length > 0 ? Math.round(totalRevenue / completed.length) : 0;
@@ -290,14 +291,16 @@ export const TransactionsPage: React.FC = () => {
             className="min-h-[40px] px-2.5 py-1.5 hig-input"
           />
         </div>
-        <button
-          type="button"
-          onClick={handleExportCsv}
-          className="min-h-[40px] inline-flex items-center gap-1.5 px-3 py-1.5 hig-btn-secondary text-xs font-semibold"
-        >
-          <Download className="w-3.5 h-3.5" aria-hidden="true" />
-          <span>Export CSV</span>
-        </button>
+        {can('reports:export') && (
+          <button
+            type="button"
+            onClick={handleExportCsv}
+            className="min-h-[40px] inline-flex items-center gap-1.5 px-3 py-1.5 hig-btn-secondary text-xs font-semibold"
+          >
+            <Download className="w-3.5 h-3.5" aria-hidden="true" />
+            <span>Export CSV</span>
+          </button>
+        )}
       </div>
 
       {/* Table */}
@@ -490,45 +493,64 @@ export const TransactionsPage: React.FC = () => {
                   <Truck className="w-3.5 h-3.5" aria-hidden="true" />
                   <span>Status Pengiriman &amp; Resi Ekspedisi</span>
                 </p>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                  <select
-                    aria-label="Status pengiriman"
-                    value={shipStatus}
-                    onChange={(e) => setShipStatus(e.target.value as ShippingStatus)}
-                    className="min-h-[36px] px-2.5 py-1 hig-input text-xs font-semibold"
-                  >
-                    {(Object.keys(SHIPPING_LABELS) as ShippingStatus[]).map((st) => (
-                      <option key={st} value={st}>
-                        {SHIPPING_LABELS[st]}
-                      </option>
-                    ))}
-                  </select>
-                  <input
-                    type="text"
-                    aria-label="Nama kurir atau ekspedisi"
-                    value={shipCourier}
-                    onChange={(e) => setShipCourier(e.target.value)}
-                    placeholder="Kurir (JNE / J&T / Cargo)"
-                    className="min-h-[36px] px-2.5 py-1 hig-input text-xs"
-                  />
-                  <input
-                    type="text"
-                    aria-label="Nomor resi pengiriman"
-                    value={shipTracking}
-                    onChange={(e) => setShipTracking(e.target.value)}
-                    placeholder="No. Resi pengiriman"
-                    className="min-h-[36px] px-2.5 py-1 hig-input text-xs font-mono"
-                  />
-                </div>
-                <div className="flex justify-end">
-                  <button
-                    type="button"
-                    onClick={handleSaveShipping}
-                    className="min-h-[34px] px-3 py-1 hig-btn-secondary font-semibold"
-                  >
-                    Simpan Pengiriman
-                  </button>
-                </div>
+                {can('transactions:shipping') ? (
+                  <>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                      <select
+                        aria-label="Status pengiriman"
+                        value={shipStatus}
+                        onChange={(e) => setShipStatus(e.target.value as ShippingStatus)}
+                        className="min-h-[36px] px-2.5 py-1 hig-input text-xs font-semibold"
+                      >
+                        {(Object.keys(SHIPPING_LABELS) as ShippingStatus[]).map((st) => (
+                          <option key={st} value={st}>
+                            {SHIPPING_LABELS[st]}
+                          </option>
+                        ))}
+                      </select>
+                      <input
+                        type="text"
+                        aria-label="Nama kurir atau ekspedisi"
+                        value={shipCourier}
+                        onChange={(e) => setShipCourier(e.target.value)}
+                        placeholder="Kurir (JNE / J&T / Cargo)"
+                        className="min-h-[36px] px-2.5 py-1 hig-input text-xs"
+                      />
+                      <input
+                        type="text"
+                        aria-label="Nomor resi pengiriman"
+                        value={shipTracking}
+                        onChange={(e) => setShipTracking(e.target.value)}
+                        placeholder="No. Resi pengiriman"
+                        className="min-h-[36px] px-2.5 py-1 hig-input text-xs font-mono"
+                      />
+                    </div>
+                    <div className="flex justify-end">
+                      <button
+                        type="button"
+                        onClick={handleSaveShipping}
+                        className="min-h-[34px] px-3 py-1 hig-btn-secondary font-semibold"
+                      >
+                        Simpan Pengiriman
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
+                    <div>
+                      <span style={{ color: 'var(--text-secondary)' }}>Status: </span>
+                      <strong>{SHIPPING_LABELS[selectedTx.shippingStatus || 'PENDING']}</strong>
+                    </div>
+                    <div>
+                      <span style={{ color: 'var(--text-secondary)' }}>Kurir: </span>
+                      <strong>{selectedTx.courierName || '-'}</strong>
+                    </div>
+                    <div>
+                      <span style={{ color: 'var(--text-secondary)' }}>No. Resi: </span>
+                      <strong className="font-mono">{selectedTx.trackingNumber || '-'}</strong>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 

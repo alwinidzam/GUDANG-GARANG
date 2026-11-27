@@ -4,6 +4,7 @@ import {
   InstallmentItem,
   PaymentPlan,
   Product,
+  Transaction,
 } from '../types/erp';
 import { addDaysISO, addMonthsISO, diffDays, roundQty, toLocalDateISO } from './format';
 
@@ -335,5 +336,59 @@ export function previewCustomerFifoAllocation(
     totalRemaining,
     totalAllocated,
     unallocated: Math.max(0, Math.round(paymentAmount || 0) - totalAllocated),
+  };
+}
+
+export interface TransactionNetMetrics {
+  returnedQtyByProduct: Map<string, number>;
+  returnedSubtotal: number;
+  returnedTotal: number;
+  netTotal: number;
+  netSubtotal: number;
+  netTax: number;
+  netCost: number;
+  netGrossProfit: number;
+}
+
+/**
+ * Computes exact net revenue, subtotal, tax, COGS, and returned quantities after any partial returns.
+ */
+export function getTransactionNetMetrics(tx: Transaction): TransactionNetMetrics {
+  const returnedQtyByProduct = new Map<string, number>();
+  let returnedSubtotal = 0;
+  let returnedTotal = 0;
+
+  for (const ret of tx.returns || []) {
+    returnedTotal += ret.refundAmount;
+    for (const ri of ret.items) {
+      returnedSubtotal += ri.refundSubtotal;
+      returnedQtyByProduct.set(
+        ri.productId,
+        roundQty((returnedQtyByProduct.get(ri.productId) || 0) + ri.qty)
+      );
+    }
+  }
+
+  let netCost = 0;
+  for (const it of tx.items) {
+    const retQty = returnedQtyByProduct.get(it.productId) || 0;
+    const netQty = Math.max(0, roundQty(it.qty - retQty));
+    netCost += it.costPrice * netQty;
+  }
+
+  const netTotal = Math.max(0, tx.total - returnedTotal);
+  const netSubtotal = Math.max(0, tx.subtotal - returnedSubtotal);
+  const returnedTax = Math.max(0, returnedTotal - returnedSubtotal);
+  const netTax = Math.max(0, tx.taxAmount - returnedTax);
+
+  return {
+    returnedQtyByProduct,
+    returnedSubtotal,
+    returnedTotal,
+    netTotal,
+    netSubtotal,
+    netTax,
+    netCost: Math.round(netCost),
+    netGrossProfit: netSubtotal - Math.round(netCost),
   };
 }

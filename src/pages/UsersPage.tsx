@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
-import { UserPlus, Pencil, Trash2, ShieldCheck } from 'lucide-react';
+import { UserPlus, Pencil, Trash2, ShieldCheck, Check, Minus } from 'lucide-react';
 import { useErp } from '../context/ErpContext';
 import { formatDate } from '../lib/format';
-import { getRoleLabel, getRoleSummary } from '../lib/rbac';
+import { getRoleLabel, getRoleSummary, hasPermission, RBAC_MATRIX_ROWS } from '../lib/rbac';
 import { Role, User } from '../types/erp';
 import { Modal, RoleBadge } from '../components/ui/SharedUi';
 
@@ -176,6 +176,71 @@ export const UsersPage: React.FC = () => {
                       </button>
                     )}
                   </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* RBAC Permission Matrix */}
+      <div className="hig-card overflow-hidden">
+        <div
+          style={{ borderColor: 'var(--border-hairline)' }}
+          className="px-5 py-4 border-b flex items-center justify-between gap-3"
+        >
+          <div>
+            <h3 className="text-sm font-bold">Matriks Hak Akses per Role (RBAC)</h3>
+            <p style={{ color: 'var(--text-secondary)' }} className="text-xs mt-0.5">
+              Pembagian wewenang modul dan aksi operasional yang ditegakkan secara otomatis di antarmuka maupun mesin transaksi.
+            </p>
+          </div>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs text-left">
+            <thead className="hig-table-head">
+              <tr>
+                <th className="py-3 px-4 font-semibold">Modul / Wewenang</th>
+                {ALL_ROLES.map((r) => (
+                  <th key={r} className="py-3 px-4 font-semibold text-center whitespace-nowrap">
+                    {getRoleLabel(r)}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {RBAC_MATRIX_ROWS.map((row) => (
+                <tr key={row.permission} className="hig-row-hover">
+                  <td className="py-2.5 px-4">
+                    <p className="font-semibold">{row.module}</p>
+                    <p style={{ color: 'var(--text-secondary)' }} className="text-[11px]">
+                      {row.description}
+                    </p>
+                  </td>
+                  {ALL_ROLES.map((r) => {
+                    const allowed = hasPermission(r, row.permission);
+                    return (
+                      <td key={r} className="py-2.5 px-4 text-center">
+                        {allowed ? (
+                          <span
+                            style={{ color: 'var(--status-positive)' }}
+                            className="inline-flex items-center justify-center"
+                            aria-label="Diizinkan"
+                          >
+                            <Check className="w-4 h-4" aria-hidden="true" />
+                          </span>
+                        ) : (
+                          <span
+                            style={{ color: 'var(--text-secondary)' }}
+                            className="inline-flex items-center justify-center opacity-40"
+                            aria-label="Tidak diizinkan"
+                          >
+                            <Minus className="w-3.5 h-3.5" aria-hidden="true" />
+                          </span>
+                        )}
+                      </td>
+                    );
+                  })}
                 </tr>
               ))}
             </tbody>

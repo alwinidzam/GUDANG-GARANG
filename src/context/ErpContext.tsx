@@ -1,5 +1,5 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
-import { getDefaultViewForRole, hasPermission, Permission } from '../lib/rbac';
+import { canAccessView, getDefaultViewForRole, hasPermission, Permission } from '../lib/rbac';
 import { createEmptyDatabase, createInitialDatabase } from '../lib/seedData';
 import { hashPassword, toLocalDateISO } from '../lib/format';
 import * as engine from '../lib/storeEngine';
@@ -26,8 +26,9 @@ const LEGACY_DB_STORAGE_KEYS = [
   'indobacco_erp_v2',
   'indobacco_erp_v3',
   'indobacco_erp_v4',
+  'indobacco_erp_v5',
 ];
-const DB_STORAGE_KEY = 'indobacco_erp_v5';
+const DB_STORAGE_KEY = 'indobacco_erp_v6';
 const SESSION_STORAGE_KEY = 'indobacco_session_user_v1';
 
 export interface ToastMessage {
@@ -132,7 +133,7 @@ export const ErpProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return null;
     }
   });
-  const [activeView, setActiveView] = useState<AppView>('dashboard');
+  const [activeView, setActiveViewState] = useState<AppView>('dashboard');
   const [printRequest, setPrintRequest] = useState<PrintRequest | null>(null);
   const [toast, setToast] = useState<ToastMessage | null>(null);
 
@@ -182,10 +183,21 @@ export const ErpProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return () => window.removeEventListener('storage', handleStorage);
   }, []);
 
-  // Ensure initial route matches role on reload
+  const setActiveView = useCallback(
+    (view: AppView) => {
+      if (currentUser && !canAccessView(currentUser.role, view)) {
+        setActiveViewState(getDefaultViewForRole(currentUser.role));
+        return;
+      }
+      setActiveViewState(view);
+    },
+    [currentUser]
+  );
+
+  // Enforce RBAC route boundary whenever user or role changes
   useEffect(() => {
-    if (currentUser && currentUser.role === 'KASIR' && activeView === 'dashboard') {
-      setActiveView('pos');
+    if (currentUser && !canAccessView(currentUser.role, activeView)) {
+      setActiveViewState(getDefaultViewForRole(currentUser.role));
     }
   }, [currentUser, activeView]);
 
@@ -232,7 +244,7 @@ export const ErpProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         throw new Error('Password salah.');
       }
       setSessionUserId(found.id);
-      setActiveView(getDefaultViewForRole(found.role));
+      setActiveViewState(getDefaultViewForRole(found.role));
       showToast('success', `Selamat datang, ${found.name}!`);
     },
     [db.users, showToast]

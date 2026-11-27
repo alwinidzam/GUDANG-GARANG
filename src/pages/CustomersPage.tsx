@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { Plus, Search, Pencil, Trash2, Eye, Phone, MapPin, Users, Download } from 'lucide-react';
 import { useErp } from '../context/ErpContext';
-import { getPlanMetrics } from '../lib/calculations';
+import { getPlanMetrics, getTransactionNetMetrics } from '../lib/calculations';
 import { downloadCsv } from '../lib/csv';
 import { formatDateTime, formatRupiah, toLocalDateISO } from '../lib/format';
 import { Customer, CustomerType } from '../types/erp';
@@ -38,7 +38,7 @@ export const CustomersPage: React.FC = () => {
       if (tx.status !== 'COMPLETED' || !tx.customerId) continue;
       const entry = map.get(tx.customerId);
       if (entry) {
-        entry.totalSpend += tx.total;
+        entry.totalSpend += getTransactionNetMetrics(tx).netTotal;
         entry.txCount += 1;
       }
     }

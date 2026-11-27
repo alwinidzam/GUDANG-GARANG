@@ -5,6 +5,7 @@ import { Layout } from './components/Layout';
 import { LoginScreen } from './components/LoginScreen';
 import { PrintModal } from './components/print/PrintModal';
 import { ToastBanner } from './components/ui/SharedUi';
+import { canAccessView } from './lib/rbac';
 import { DashboardPage } from './pages/DashboardPage';
 import { PosPage } from './pages/PosPage';
 import { WarehousePage } from './pages/WarehousePage';
@@ -34,33 +35,36 @@ const AppShell: React.FC = () => {
   const fallbackPage = can('view:dashboard') ? <DashboardPage /> : <PosPage />;
 
   const renderPage = () => {
+    if (!canAccessView(currentUser.role, activeView)) {
+      return fallbackPage;
+    }
     switch (activeView) {
       case 'dashboard':
-        return can('view:dashboard') ? <DashboardPage /> : <PosPage />;
+        return <DashboardPage />;
       case 'pos':
-        return can('view:pos') ? <PosPage /> : fallbackPage;
+        return <PosPage />;
       case 'warehouse':
-        return can('view:warehouse') ? <WarehousePage /> : fallbackPage;
+        return <WarehousePage />;
       case 'purchases':
-        return can('view:purchases') ? <PurchasesPage /> : fallbackPage;
+        return <PurchasesPage />;
       case 'transactions':
         return <TransactionsPage />;
       case 'receivables':
-        return can('view:receivables') ? <ReceivablesPage /> : fallbackPage;
+        return <ReceivablesPage />;
       case 'products':
         return <ProductsPage />;
       case 'customers':
         return <CustomersPage />;
       case 'expenses':
-        return can('view:expenses') ? <ExpensesPage /> : fallbackPage;
+        return <ExpensesPage />;
       case 'reports':
-        return can('view:reports') ? <ReportsPage /> : fallbackPage;
+        return <ReportsPage />;
       case 'audit':
-        return can('view:audit') ? <AuditLogsPage /> : fallbackPage;
+        return <AuditLogsPage />;
       case 'users':
-        return can('view:users') ? <UsersPage /> : fallbackPage;
+        return <UsersPage />;
       case 'settings':
-        return can('view:settings') ? <SettingsPage /> : fallbackPage;
+        return <SettingsPage />;
       default:
         return fallbackPage;
     }

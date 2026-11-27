@@ -274,14 +274,16 @@ export const ReceivablesPage: React.FC = () => {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            onClick={handleExportReceivables}
-            className="min-h-[40px] inline-flex items-center gap-1.5 px-3.5 py-2 hig-btn-secondary text-xs font-semibold"
-          >
-            <Download className="w-3.5 h-3.5" aria-hidden="true" />
-            <span>Export CSV</span>
-          </button>
+          {can('reports:export') && (
+            <button
+              type="button"
+              onClick={handleExportReceivables}
+              className="min-h-[40px] inline-flex items-center gap-1.5 px-3.5 py-2 hig-btn-secondary text-xs font-semibold"
+            >
+              <Download className="w-3.5 h-3.5" aria-hidden="true" />
+              <span>Export CSV</span>
+            </button>
+          )}
           {can('receivables:pay') && activeDebtCustomers.length > 0 && (
             <button
               type="button"

@@ -174,7 +174,7 @@ export function terbilangRupiah(amount: number): string {
 }
 
 /**
- * Deterministic lightweight hash for local multi-user demo & browser storage.
+ * Deterministic lightweight hash for local multi-user browser storage.
  * Note: For internet-facing backend auth, replace with Argon2id/bcrypt on the server.
  */
 export function hashPassword(plain: string): string {

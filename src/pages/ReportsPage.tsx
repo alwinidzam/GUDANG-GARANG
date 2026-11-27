@@ -12,8 +12,9 @@ import {
 import { Download, BarChart3 } from 'lucide-react';
 import { useErp } from '../context/ErpContext';
 import { useTheme } from '../context/ThemeContext';
+import { getTransactionNetMetrics } from '../lib/calculations';
 import { downloadCsv } from '../lib/csv';
-import { addDaysISO, extractDateISO, formatRupiah, toLocalDateISO } from '../lib/format';
+import { addDaysISO, extractDateISO, formatRupiah, roundQty, toLocalDateISO } from '../lib/format';
 import { EmptyState } from '../components/ui/SharedUi';
 
 type ReportTab = 'DAILY' | 'MONTHLY' | 'BEST_SELLER' | 'TOP_CUSTOMERS' | 'TURNOVER';
@@ -44,6 +45,7 @@ export const ReportsPage: React.FC = () => {
     >();
     for (const tx of completedTxs) {
       const d = extractDateISO(tx.createdAt);
+      const net = getTransactionNetMetrics(tx);
       const curr = map.get(d) || {
         date: d,
         txCount: 0,
@@ -52,9 +54,9 @@ export const ReportsPage: React.FC = () => {
         hpp: 0,
       };
       curr.txCount += 1;
-      curr.grossRevenue += tx.total;
-      curr.netSubtotal += tx.subtotal;
-      curr.hpp += tx.items.reduce((a, it) => a + it.costPrice * it.qty, 0);
+      curr.grossRevenue += net.netTotal;
+      curr.netSubtotal += net.netSubtotal;
+      curr.hpp += net.netCost;
       map.set(d, curr);
     }
     return Array.from(map.values())
@@ -77,6 +79,7 @@ export const ReportsPage: React.FC = () => {
     >();
     for (const tx of completedTxs) {
       const ym = extractDateISO(tx.createdAt).slice(0, 7);
+      const net = getTransactionNetMetrics(tx);
       const curr = map.get(ym) || {
         month: ym,
         txCount: 0,
@@ -86,12 +89,11 @@ export const ReportsPage: React.FC = () => {
         expenses: 0,
         netProfit: 0,
       };
-      const txHpp = tx.items.reduce((a, it) => a + it.costPrice * it.qty, 0);
       curr.txCount += 1;
-      curr.grossRevenue += tx.total;
-      curr.tax += tx.taxAmount;
-      curr.hpp += txHpp;
-      curr.netProfit += tx.subtotal - txHpp;
+      curr.grossRevenue += net.netTotal;
+      curr.tax += net.netTax;
+      curr.hpp += net.netCost;
+      curr.netProfit += net.netGrossProfit;
       map.set(ym, curr);
     }
     for (const exp of db.expenses || []) {
@@ -120,7 +122,11 @@ export const ReportsPage: React.FC = () => {
       { sku: string; name: string; unit: string; qtySold: number; revenue: number; profit: number }
     >();
     for (const tx of completedTxs) {
+      const net = getTransactionNetMetrics(tx);
       for (const it of tx.items) {
+        const retQty = net.returnedQtyByProduct.get(it.productId) || 0;
+        const netQty = Math.max(0, roundQty(it.qty - retQty));
+        if (netQty <= 0) continue;
         const curr = map.get(it.productId) || {
           sku: it.sku,
           name: it.productName,
@@ -129,9 +135,9 @@ export const ReportsPage: React.FC = () => {
           revenue: 0,
           profit: 0,
         };
-        curr.qtySold += it.qty;
-        curr.revenue += it.subtotal;
-        curr.profit += (it.sellPrice - it.costPrice) * it.qty;
+        curr.qtySold = roundQty(curr.qtySold + netQty);
+        curr.revenue += Math.round(it.sellPrice * netQty);
+        curr.profit += Math.round((it.sellPrice - it.costPrice) * netQty);
         map.set(it.productId, curr);
       }
     }
@@ -144,6 +150,7 @@ export const ReportsPage: React.FC = () => {
       { name: string; txCount: number; totalSpend: number; avgOrder: number }
     >();
     for (const tx of completedTxs) {
+      const net = getTransactionNetMetrics(tx);
       const key = tx.customerId || 'UMUM';
       const curr = map.get(key) || {
         name: tx.customerName,
@@ -152,7 +159,7 @@ export const ReportsPage: React.FC = () => {
         avgOrder: 0,
       };
       curr.txCount += 1;
-      curr.totalSpend += tx.total;
+      curr.totalSpend += net.netTotal;
       curr.avgOrder = Math.round(curr.totalSpend / curr.txCount);
       map.set(key, curr);
     }
@@ -162,8 +169,11 @@ export const ReportsPage: React.FC = () => {
   const turnoverRows = useMemo(() => {
     const soldMap = new Map<string, number>();
     for (const tx of completedTxs) {
+      const net = getTransactionNetMetrics(tx);
       for (const it of tx.items) {
-        soldMap.set(it.productId, (soldMap.get(it.productId) || 0) + it.qty);
+        const retQty = net.returnedQtyByProduct.get(it.productId) || 0;
+        const netQty = Math.max(0, roundQty(it.qty - retQty));
+        soldMap.set(it.productId, roundQty((soldMap.get(it.productId) || 0) + netQty));
       }
     }
     return db.products

@@ -1698,8 +1698,8 @@ export function updateTransactionShipping(
     trackingNumber?: string;
   }
 ): DatabaseState {
-  if (!hasPermission(actor.role, 'view:transactions')) {
-    throw new Error('Akses ditolak.');
+  if (!hasPermission(actor.role, 'transactions:shipping')) {
+    throw new Error('Akses ditolak: Anda tidak memiliki izin memperbarui status pengiriman.');
   }
   const tx = state.transactions.find((t) => t.id === input.txId);
   if (!tx) throw new Error('Transaksi tidak ditemukan.');

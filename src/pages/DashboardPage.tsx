@@ -22,7 +22,11 @@ import {
 } from 'lucide-react';
 import { useErp } from '../context/ErpContext';
 import { useTheme } from '../context/ThemeContext';
-import { calcInventoryValuation, getPlanMetrics } from '../lib/calculations';
+import {
+  calcInventoryValuation,
+  getPlanMetrics,
+  getTransactionNetMetrics,
+} from '../lib/calculations';
 import { addDaysISO, extractDateISO, formatRupiah, toLocalDateISO } from '../lib/format';
 
 const METHOD_COLORS: Record<string, string> = {
@@ -73,17 +77,17 @@ export const DashboardPage: React.FC = () => {
     for (const tx of db.transactions) {
       if (tx.status !== 'COMPLETED') continue;
       const d = extractDateISO(tx.createdAt);
+      const net = getTransactionNetMetrics(tx);
       if (d >= cutoff) {
-        revenue30 += tx.total;
-        netSubtotal30 += tx.subtotal;
+        revenue30 += net.netTotal;
+        netSubtotal30 += net.netSubtotal;
         txCount30 += 1;
-        const cogs = tx.items.reduce((acc, it) => acc + it.costPrice * it.qty, 0);
-        grossProfit30 += tx.subtotal - cogs;
-        methodTotals[tx.paymentMethod] = (methodTotals[tx.paymentMethod] || 0) + tx.total;
+        grossProfit30 += net.netGrossProfit;
+        methodTotals[tx.paymentMethod] = (methodTotals[tx.paymentMethod] || 0) + net.netTotal;
       }
       if (dailyMap.has(d)) {
         const entry = dailyMap.get(d)!;
-        entry.omset += tx.total;
+        entry.omset += net.netTotal;
         entry.trx += 1;
       }
     }
